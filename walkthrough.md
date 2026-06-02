@@ -144,6 +144,85 @@ Tại sao lại viết ở đây? Vì thuật toán Z-Score cần tính mức tr
 ```
 - **Wash trade** là hành vi tự mua tự bán liên tục cùng 1 giá cùng 1 giây để thao túng khối lượng. Lệnh này đếm số lượng giao dịch diễn ra trên cùng 1 đồng coin tại exacly cùng 1 mili-giây. Nếu > 4, đánh dấu là Wash Trade.
 
+#### Sơ đồ luồng logic Phát hiện Bất thường (Anomaly Detection Flowchart)
+
+```mermaid
+graph TD
+    %% Custom styling to make the diagram look modern and premium
+    classDef startEnd fill:#F3F4F6,stroke:#1F2937,stroke-width:2px;
+    classDef process fill:#FFFFFF,stroke:#374151,stroke-width:1px,rx:5px,ry:5px;
+    classDef decision fill:#FFFFFF,stroke:#374151,stroke-width:1.5px;
+    classDef anomalyTrue fill:#FEE2E2,stroke:#EF4444,stroke-width:1.5px,color:#991B1B,rx:5px,ry:5px;
+    classDef anomalyFalse fill:#D1FAE5,stroke:#10B981,stroke-width:1.5px,color:#065F46,rx:5px,ry:5px;
+
+    %% Nodes definition
+    StartNode(((Bắt đầu))):::startEnd
+    ReceiveData[Nhận Data]:::process
+    GroupData[Chia nhóm dữ liệu theo crypto_pair_key]:::process
+    
+    CalcMetrics["Tính:<br/>- batch_mean_usd<br/>- batch_std_usd<br/>- batch_avg_price<br/>- batch_count"]:::process
+    
+    CalcDerived["Tính: z_score, price_dev_pct, wash_cluster_size"]:::process
+    
+    CheckAnomaly{"Kiểm tra Điều kiện Anomaly"}:::decision
+    
+    Rule1["Rule 1: Khối lượng đột biến"]:::process
+    Rule2["Rule 2: Mạng lưới thao túng"]:::process
+    Rule3["Rule 3: Trượt giá"]:::process
+    
+    Cond1{"batch_count > 30<br/>AND<br/>z_score > 3.0?"}:::decision
+    Cond2{"wash_cluster_size >= 4?"}:::decision
+    Cond3{"batch_count > 30<br/>AND<br/>price_dev_pct > 0.01<br/>AND<br/>amount_usd > batch_mean?"}:::decision
+    
+    AssignTrue1[Gán]:::process
+    AssignTrue2[Gán]:::process
+    AssignTrue3[Gán]:::process
+    
+    SkipFalse1[Bỏ qua]:::process
+    SkipFalse2[Bỏ qua]:::process
+    SkipFalse3[Bỏ qua]:::process
+    
+    IsAnomalyTrue["is_anomaly = True"]:::anomalyTrue
+    IsAnomalyFalse["is_anomaly = False"]:::anomalyFalse
+    
+    EndNode(((End))):::startEnd
+
+    %% Connection lines
+    StartNode --> ReceiveData
+    ReceiveData --> GroupData
+    GroupData --> CalcMetrics
+    CalcMetrics --> CalcDerived
+    CalcDerived --> CheckAnomaly
+    
+    CheckAnomaly -->|Quy tắc 1| Rule1
+    CheckAnomaly -->|Quy tắc 2| Rule2
+    CheckAnomaly -->|Quy tắc 3| Rule3
+    
+    Rule1 --> Cond1
+    Rule2 --> Cond2
+    Rule3 --> Cond3
+    
+    Cond1 -->|Đúng| AssignTrue1
+    Cond1 -->|Sai| SkipFalse1
+    
+    Cond2 -->|Đúng| AssignTrue2
+    Cond2 -->|Sai| SkipFalse2
+    
+    Cond3 -->|Đúng| AssignTrue3
+    Cond3 -->|Sai| SkipFalse3
+    
+    AssignTrue1 --> IsAnomalyTrue
+    AssignTrue2 --> IsAnomalyTrue
+    AssignTrue3 --> IsAnomalyTrue
+    
+    SkipFalse1 --> IsAnomalyFalse
+    SkipFalse2 --> IsAnomalyFalse
+    SkipFalse3 --> IsAnomalyFalse
+    
+    IsAnomalyTrue --> EndNode
+    IsAnomalyFalse --> EndNode
+```
+
 ### 2.4 Chiến lược Dual Sink (Lưu đa luồng) & DLQ (Dòng 340 - 547)
 
 **PostgreSQL (Hệ thống tức thời):**

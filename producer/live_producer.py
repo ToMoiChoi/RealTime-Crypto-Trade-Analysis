@@ -10,7 +10,7 @@ All data processing (cleansing, deduplication, classification,
 anomaly detection) is performed downstream by Spark Structured
 Streaming (processor/spark_processor.py).
 
-Data source: wss://stream.binance.com:9443 (free, no API key required)
+Data source: wss://stream.binance.com:9443 
 """
 
 import json

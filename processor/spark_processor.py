@@ -410,7 +410,7 @@ def write_to_postgres(rows: list, batch_id: int, row_count: int):
 BQ_BUFFER = []
 BQ_BUFFER_LOCK = threading.Lock()
 LAST_BQ_UPLOAD_TIME = time.time()
-BQ_UPLOAD_INTERVAL_SEC = 10   # Khoảng thời gian flush đệm lên BigQuery (10 giây)
+BQ_UPLOAD_INTERVAL_SEC = 20   # Khoảng thời gian flush đệm lên BigQuery (20 giây)
 BQ_UPLOAD_ROWS_LIMIT   = 5000 # Kích thước đệm tối đa trước khi tự động đẩy (5000 bản ghi)
 
 

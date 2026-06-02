@@ -1,0 +1,74 @@
+chuyển cái này sang wordid 
+12:14 AM, 5/28/2026
+
+
+Tôi đã chuyển đổi thành công tài liệu báo cáo kỹ thuật từ định dạng Markdown sang định dạng Microsoft Word (.docx).
+
+Tệp tin Word đã được tạo và lưu trữ tại đường dẫn sau trong thư mục dự án của bạn:
+
+technical_report_final.docx
+Chi tiết định dạng đã cấu hình trong file Word:
+Font chữ tiêu chuẩn: Sử dụng Times New Roman (cỡ chữ 12pt, dãn dòng 1.3 - 1.5) theo đúng quy chuẩn trình bày khóa luận tốt nghiệp tại Việt Nam.
+Định dạng bảng biểu: Được thiết kế tối ưu với dòng tiêu đề màu xanh đậm (Deep Blue), chữ trắng, xen kẽ màu nền zebra nhẹ giữa các dòng (nhạt và trắng) giúp bảng cực kỳ dễ đọc và chuyên nghiệp.
+Phân lớp Headings: Các tiêu đề từ lớn đến nhỏ được phân cấp tự động thành Heading 1 (xanh đậm, cỡ 18pt), Heading 2 (xanh vừa, cỡ 14pt), Heading 3 (chữ nghiêng cỡ 12pt) để thuận tiện cho việc tạo Mục lục tự động sau này.
+Đoạn mã code và toán học: Các đoạn mã và các biểu thức toán học được chuyển đổi sang font Courier New / chữ nghiêng tương ứng để hiển thị trực quan nhất.
+Bạn có thể trực tiếp mở tệp tin 
+technical_report_final.docx
+ bằng Microsoft Word để kiểm tra nội dung và nộp trực tiếp.
+
+Convert Md To Docx
+12:14 AM, 5/28/2026
+
+
+
+tôi vần viết vào vở để chuân bị báo cáo thì bận giúp tôi xem tôi cần note những gì
+1:53 PM, 5/28/2026
+
+
+Để giúp bạn chuẩn bị tốt nhất trước hội đồng chấm thi của Thầy Cường (rất kỹ tính), dưới đây là bản tóm tắt cô đọng nhất bạn nên ghi lại vào vở để học thuộc.
+
+Đây là những điểm mấu chốt, tập trung giải quyết các câu hỏi "Tại sao" (Why) mà thầy cô rất hay xoáy vào:
+
+1. ĐỊNH VỊ ĐỀ TÀI (Tránh bị bẻ về mặt lý thuyết mới)
+Bản chất đề tài: Là Khóa luận ứng dụng (Applied Thesis), không phải nghiên cứu phát kiến ra thuật toán mới.
+Điểm mới: Đưa các lý thuyết kinh điển (Khung phát hiện bất thường của Chandola 2009 và mô hình wash trading của Victor 2021) từ môi trường tĩnh (Batch ETL) sang môi trường luồng thời gian thực (Streaming), sử dụng dữ liệu thị trường công khai của Binance với độ trễ cực thấp (< 500ms).
+2. KIẾN TRÚC HỆ THỐNG & TỐI ƯU HÓA (Kiến trúc Kappa)
+Tại sao dùng Kappa Architecture? Chỉ chạy duy nhất 1 codebase cho cả dữ liệu lịch sử và thời gian thực, triệt tiêu sự bất đồng bộ và phức tạp khi phải duy trì 2 codebase song song (như kiến trúc Lambda).
+Tại sao cấu hình shuffle.partitions = 2 ở Spark? Vì chạy chế độ Local (Single-Node). Mặc định Spark chia 200 partitions gây chi phí quản lý (overhead) rất lớn cho CPU. Giảm xuống 2 giúp tăng tốc độ xử lý micro-batch đáng kể.
+Tại sao dùng Kafka nén LZ4 và cấu hình acks=1?
+lz4: Nén/giải nén cực nhanh, tốn ít CPU, đảm bảo dòng dữ liệu đi tức thời.
+acks=1: Chỉ chờ Broker Leader xác nhận, tối ưu thông lượng (throughput) ghi dữ liệu cao nhất.
+3. ĐẢM BẢO EXACTLY-ONCE & KHẢ NĂNG CHỊU LỖI (Fault-Tolerance)
+Cơ chế hoạt động: Đạt được nhờ sự kết hợp 3 yếu tố:
+Kafka Offsets: Đóng vai trò là chỉ mục lưu vị trí đọc dữ liệu (dấu trang bất biến).
+Spark Checkpointing & WAL (Write-Ahead Logs): Lưu vết tiến trình đã đọc xuống đĩa cứng để tự phục hồi khi sập nguồn.
+PostgreSQL UPSERT (Idempotent Sink): Sử dụng khóa chính transaction_id PRIMARY KEY kết hợp lệnh ON CONFLICT DO UPDATE làm rào chắn cuối cùng ở đĩa cứng, ngăn chặn trùng lặp lọt vào DB kể cả khi Spark phải chạy lại từ checkpoint trước.
+Tại sao ghi BigQuery bằng Parquet Async Load thay vì Streaming Insert?
+Ghi Parquet cục bộ rồi load bất đồng bộ (mỗi 10 giây hoặc 5.000 dòng) giúp tránh vượt hạn mức API (Rate Limit) của BigQuery và tiết kiệm chi phí (Google Cloud miễn phí hoàn toàn tính năng Load Job).
+4. PHÁT HIỆN BẤT THƯỜNG (Cốt lõi thuật toán)
+Phân biệt Trade Time vs Window:
+Trade Time: Mốc thời gian tĩnh, chính xác tuyệt đối từ Binance (milliseconds).
+Window: Khoảng thời gian (duration/interval), ví dụ: 30s watermark để dọn RAM, hoặc 200ms micro-batch để làm biên gom nhóm dữ liệu tính toán.
+DEX (Graph Analysis) vs CEX (Statistical Rule):
+Nghiên cứu của Victor 2021 dùng Graph Analysis trên DEX vì Blockchain công khai Địa chỉ ví (wallet addresses) làm các Nút (Nodes) cố định lâu dài để tìm chu trình tự mua bán.
+Binance là sàn tập trung (CEX) ẩn hoàn toàn địa chỉ ví. Mặc dù có buyer_order_id và seller_order_id, nhưng các ID lệnh này mang tính chất tạm thời (transient), chỉ tồn tại vài giây rồi biến mất vĩnh viễn, không thể làm Nút cố định để vẽ đồ thị.
+→ Lựa chọn duy nhất và tối ưu cho CEX là Statistical Rule (Quy tắc thống kê động trên cửa sổ trượt).
+Phân loại Anomaly theo Chandola (2009) áp dụng trong hệ thống:
+Point Anomaly (Bất thường điểm): Giao dịch Cá voi (>1M USD), giao dịch bụi (<0.01 USD), hoặc Z-Score động > 3.0 (vượt ngưỡng 3-Sigma của lô hiện tại).
+Collective Anomaly (Bất thường nhóm): Gom nhóm giao dịch trùng nhau trong cùng 1 mili-giây đạt số lượng ≥4 (wash_cluster_size >= 4) → Dấu hiệu của bot tự mua tự bán tạo volume ảo.
+Contextual Anomaly (Bất thường ngữ cảnh): Giao dịch bị trượt giá lớn (> 1% so với trung bình lô) đi kèm khối lượng giao dịch cao hơn mức trung bình trong micro-batch hiện tại.
+1:53 PM, 5/28/2026
+
+
+
+2. KIẾN TRÚC HỆ THỐNG & TỐI ƯU HÓA (Kiến trúc Kappa)
+Tại sao dùng Kappa Architecture? Chỉ chạy duy nhất 1 codebase cho cả dữ liệu lịch sử và thời gian thực, triệt tiêu sự bất đồng bộ và phức tạp khi phải duy trì 2 codebase song song (như kiến trúc Lambda). quả bào báo nào nhỉ 
+11:29 PM, 5/28/2026
+
+
+Ý kiến này dựa trên bài báo/bài viết kinh điển đề xuất kiến trúc Kappa của tác giả:
+
+Tác giả: Jay Kreps (2014) (ông là cha đẻ của Apache Kafka, đồng sáng lập Confluent).
+Tên bài viết: "Questioning the Lambda Architecture" (Hoài nghi về Kiến trúc Lambda), đăng trên nền tảng công nghệ uy tín O'Reilly Media.
+Ý nghĩa bạn ghi lại vào vở để trả lời nếu bị hỏi:
+Jay Kreps (2014) chỉ ra rằng kiến trúc Lambda cũ bắt buộc người ta phải duy trì 2 hệ thống độc lập: Lớp Batch (xử lý dữ liệu lịch sử chậm) và Lớp Stream (xử lý dữ liệu thực tế nhanh). Việc này làm tăng gấp đôi công sức viết code, bảo trì và gây lệch pha dữ liệu. Ông đề xuất Kiến trúc Kappa, trong đó coi dữ liệu lịch sử cũng chỉ là một luồng chảy (stream) được lưu trữ bền vững trong Kafka, và ta chỉ dùng duy nhất một công cụ xử lý dòng (ở đây là Spark Structured Streaming) để xử lý mọi dữ liệu.
