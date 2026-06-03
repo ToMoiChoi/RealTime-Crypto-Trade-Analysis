@@ -410,7 +410,7 @@ def write_to_postgres(rows: list, batch_id: int, row_count: int):
 BQ_BUFFER = []
 BQ_BUFFER_LOCK = threading.Lock()
 LAST_BQ_UPLOAD_TIME = time.time()
-BQ_UPLOAD_INTERVAL_SEC = 20   # Khoảng thời gian flush đệm lên BigQuery (20 giây)
+BQ_UPLOAD_INTERVAL_SEC = 60   # Khoảng thời gian flush đệm lên BigQuery (60 giây)
 BQ_UPLOAD_ROWS_LIMIT   = 5000 # Kích thước đệm tối đa trước khi tự động đẩy (5000 bản ghi)
 
 
@@ -601,7 +601,7 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             current_buffer_size = len(BQ_BUFFER)
             time_since_last_upload = time.time() - LAST_BQ_UPLOAD_TIME
 
-        if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT or time_since_last_upload >= BQ_UPLOAD_INTERVAL_SEC:
+        if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT:
             with BQ_BUFFER_LOCK:
                 upload_data = BQ_BUFFER.copy()
                 BQ_BUFFER.clear()

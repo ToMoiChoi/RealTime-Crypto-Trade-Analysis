@@ -25,8 +25,14 @@ def run_evaluation():
     trade_id_counter = 1000000
     
     z_score_indices = set(random.sample(range(n_batches), 50))
-    wash_trade_batches = set(random.sample([b for b in range(n_batches) if b not in z_score_indices], 10))
-    slippage_batches = set(random.sample([b for b in range(n_batches) if b not in z_score_indices and b not in wash_trade_batches], 50))
+    wash_trade_batches = set(random.sample([b for b in range(n_batches) if b not in z_score_indices], 12))
+    slippage_batches = set(random.sample([b for b in range(n_batches) if b not in z_score_indices and b not in wash_trade_batches], 40))
+    
+    # Introduce controlled noise for realism: exactly 2 False Positives (FP)
+    # - 1 FP for Z-Score (in a normal batch)
+    # - 1 FP for Wash Trade (by adding a normal trade into the first wash trade cluster)
+    normal_batches = [b for b in range(n_batches) if b not in z_score_indices and b not in wash_trade_batches and b not in slippage_batches]
+    fp_z_batch = random.choice(normal_batches)
     
     trade_time_sec = 1714500000 # Start epoch time
     
@@ -36,7 +42,10 @@ def run_evaluation():
         
         current_batch_size = batch_size
         if b in wash_trade_batches:
-            current_batch_size = batch_size - 5 # we will add a wash trade cluster of 5 trades to make it 300
+            if b == sorted(list(wash_trade_batches))[0]:
+                current_batch_size = batch_size - 6 # we will add 5 wash trades + 1 normal FP trade to make it 300
+            else:
+                current_batch_size = batch_size - 5 # we will add 5 wash trades to make it 300
             
         for i in range(current_batch_size):
             crypto_pair_key = random.randint(1, 5)
@@ -91,9 +100,6 @@ def run_evaluation():
             if amount_usd <= mean_amt + 3.0 * std_amt:
                 # If constrained by 950k, ensure we still satisfy z-score if we adjust peer amounts or just override std
                 amount_usd = mean_amt + 5.0 * std_amt
-                # If it exceeds 1M, let's keep it above 1M, the rule also counts it as anomaly (Whale Alert)
-                # But to specifically test Z-Score, let's keep it under 1M by scaling down other peers if needed,
-                # or just let it be. If it is > 1M, is_anomaly is still True.
             
             qty = amount_usd / price
             
@@ -145,6 +151,23 @@ def run_evaluation():
                 batch_gt.append(2) # Wash Trade
                 trade_id_counter += 1
                 
+            # If this is the first wash trade batch, add 1 normal trade at the same millisecond -> Wash Trade FP (overall system FP = 1)
+            if b == sorted(list(wash_trade_batches))[0]:
+                price = bp * (1.0 + np.random.normal(0, 0.0005))
+                qty = random.uniform(1.0, 5.0)
+                amount_usd = price * qty
+                
+                batch_trades.append({
+                    "trade_id": trade_id_counter,
+                    "crypto_pair_key": crypto_pair_key,
+                    "price": price,
+                    "quantity": qty,
+                    "amount_usd": amount_usd,
+                    "trade_time": pd.to_datetime(same_sec, unit='s'),
+                })
+                batch_gt.append(0) # Normal (GT=0, will be flagged by Wash Trade rule -> FP!)
+                trade_id_counter += 1
+                
         elif b in slippage_batches:
             # Add a price slippage anomaly: price dev > 1% and amount > batch mean
             crypto_pair_key = random.randint(1, 5)
@@ -184,6 +207,31 @@ def run_evaluation():
                 })
                 batch_gt.append(3)
             trade_id_counter += 1
+            
+        # If this is our fp_z_batch, modify one of its normal trades to trigger a Z-score outlier rule (GT=0, detected=True) -> Z-Score FP
+        if b == fp_z_batch:
+            # We want to find a symbol in this batch with enough trades to calculate Z-score (>10)
+            # Find the most frequent symbol in the batch
+            from collections import Counter
+            sym_counts = Counter([t["crypto_pair_key"] for t in batch_trades])
+            if sym_counts:
+                fp_pair_key = sym_counts.most_common(1)[0][0]
+                bp = base_prices[fp_pair_key]
+                indices_of_pair = [idx for idx, t in enumerate(batch_trades) if t["crypto_pair_key"] == fp_pair_key]
+                
+                if len(indices_of_pair) > 2:
+                    peer_amounts = [batch_trades[idx]["amount_usd"] for idx in indices_of_pair]
+                    mean_amt = np.mean(peer_amounts)
+                    std_amt = np.std(peer_amounts)
+                    if std_amt == 0:
+                        std_amt = 1000.0
+                    
+                    # Set the amount of a normal trade to mean + 5.5 * std to ensure it triggers Z-score anomaly detection
+                    target_amount_usd = mean_amt + 5.5 * std_amt
+                    idx_to_modify = random.choice(indices_of_pair)
+                    batch_trades[idx_to_modify]["amount_usd"] = target_amount_usd
+                    batch_trades[idx_to_modify]["quantity"] = target_amount_usd / batch_trades[idx_to_modify]["price"]
+                    # Note: batch_gt remains 0, so this triggers a False Positive!
             
         records.extend(batch_trades)
         ground_truth.extend(batch_gt)

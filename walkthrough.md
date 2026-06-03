@@ -236,9 +236,9 @@ graph TD
 **BigQuery & DLQ (Hệ thống dự phòng Async):**
 - BigQuery lưu trữ dạng Data Warehouse cho báo cáo PowerBI. Tuy nhiên nếu đẩy lên mỗi 200ms thì Google sẽ chém tiền rate-limit.
 ```python
-620:             if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT or time_since_last_upload >= BQ_UPLOAD_INTERVAL_SEC:
+604:         if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT:
 ```
-- Buffer: Gom đủ 5000 records hoặc đợi 10 giây mới đẩy 1 lần.
+- Buffer: Gom đủ 5000 records mới thực hiện gọi API nạp dữ liệu lên BigQuery.
 ```python
 523:         except Exception as e:
 ...
