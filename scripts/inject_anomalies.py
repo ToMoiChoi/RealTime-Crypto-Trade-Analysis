@@ -78,9 +78,8 @@ def main():
             price = round(btc_base + random.uniform(-50, 50), 2)
             qty = round(random.uniform(0.01, 0.05), 4) # amount around $650 to $3250
             send_trade(producer, "BTCUSDT", price, qty)
-            time.sleep(0.05)
         producer.flush()
-        print("    [OK] Đã bơm xong 35 lệnh BTC làm nền.")
+        print("    [OK] Đã bơm xong 35 lệnh BTC làm nền (gửi đồng thời để lọt vào 1 micro-batch).")
 
     if choice == "2" or choice == "5":
         print("\n--> [2] Đang bơm cụm Wash Trade (5 giao dịch BTC cùng 1 giây)...")
@@ -96,22 +95,34 @@ def main():
 
     if choice == "3" or choice == "5":
         print("\n--> [3] Đang bơm lệnh khối lượng đột biến (Z-Score Outlier)...")
+        # Bơm 35 lệnh nền ĐỒNG THỜI để thỏa mãn điều kiện batch_count > 30 trong 1 micro-batch
+        for i in range(35):
+            price = round(btc_base + random.uniform(-50, 50), 2)
+            qty = round(random.uniform(0.01, 0.05), 4)
+            send_trade(producer, "BTCUSDT", price, qty)
+            
         # Ensure we have a high volume, e.g. amount_usd = 850k (under 1M to test Z-score without Whale Alert)
         large_qty = round(850000.0 / btc_base, 4)
         payload = send_trade(producer, "BTCUSDT", btc_base, large_qty)
         print(f"    Sent TradeID: {payload['trade_id']} | Price: {payload['price']} | Qty: {payload['quantity']} | Amount USD: ~${btc_base * large_qty:,.2f}")
         producer.flush()
-        print("    [OK] Đã gửi Z-Score Outlier.")
+        print("    [OK] Đã gửi Z-Score Outlier (cùng với 35 lệnh nền).")
 
     if choice == "4" or choice == "5":
         print("\n--> [4] Đang bơm lệnh gây trượt giá (Price Slippage > 1% + Volume lớn)...")
-        # Deviate price by +2%
+        # Bơm 35 lệnh nền ĐỒNG THỜI để tạo giá trung bình cho micro-batch
+        for i in range(35):
+            price = round(btc_base + random.uniform(-10, 10), 2)
+            qty = round(random.uniform(0.01, 0.05), 4)
+            send_trade(producer, "BTCUSDT", price, qty)
+            
+        # Deviate price by +2.5%
         high_price = round(btc_base * 1.025, 2)
         qty = 0.5 # amount around $32.5k (well above normal average of ~$2k)
         payload = send_trade(producer, "BTCUSDT", high_price, qty)
         print(f"    Sent TradeID: {payload['trade_id']} | Price: {payload['price']} (Dev: +2.5%) | Qty: {payload['quantity']} | Amount USD: ~${high_price * qty:,.2f}")
         producer.flush()
-        print("    [OK] Đã gửi Price Slippage outlier.")
+        print("    [OK] Đã gửi Price Slippage outlier (cùng với 35 lệnh nền).")
 
     print("\n[HOÀN TẤT] Dữ liệu đã được gửi thành công vào Kafka. Hãy kiểm tra màn hình log của Spark Processor hoặc database Postgres.")
     producer.close()

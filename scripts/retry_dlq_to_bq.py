@@ -90,6 +90,13 @@ def main():
         total_rows = len(combined_df)
         logger.info(f"Successfully merged {len(parquet_files)} files. Total merged rows: {total_rows:,}")
         
+        # Enforce Int64 for Integer schema columns to prevent float inference
+        int_cols = ["trade_id", "date_key", "time_key", "crypto_pair_key", "volume_category_key", 
+                    "buyer_order_id", "seller_order_id", "wash_cluster_size"]
+        for c in int_cols:
+            if c in combined_df.columns:
+                combined_df[c] = combined_df[c].astype("Int64")
+        
         # Write to temporary combined Parquet file
         temp_combined_path = os.path.join(DLQ_DIR, "temp_combined_retry.parquet")
         combined_df.to_parquet(

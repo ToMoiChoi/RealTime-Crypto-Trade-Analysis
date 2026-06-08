@@ -1,5 +1,7 @@
 # Real-time Crypto Data Pipeline: Binance Trade Analysis & Anomaly Detection
 
+**🎬 Demo Video:** [https://www.youtube.com/watch?v=GCkgsPlZs2A](https://www.youtube.com/watch?v=GCkgsPlZs2A)
+
 A real-time streaming data pipeline for cryptocurrency market data, built on **Kimball Star Schema** methodology. The system ingests live trade data from Binance WebSocket, processes it through Apache Spark Structured Streaming with a 7-step transformation pipeline, applies dynamic statistical anomaly detection, and stores results in a dual-sink architecture (PostgreSQL + Google BigQuery).
 
 ---

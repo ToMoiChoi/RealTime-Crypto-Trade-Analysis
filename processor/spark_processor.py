@@ -441,6 +441,13 @@ def _bq_async_upload(rows_dicts: list, batch_id: int, row_count: int):
         for c in float_cols:
             if c in pdf.columns:
                 pdf[c] = pdf[c].astype(float)
+                
+        # Integer matching BQ Schema (using pandas Int64 to support potential NaNs without converting to float)
+        int_cols = ["trade_id", "date_key", "time_key", "crypto_pair_key", "volume_category_key", 
+                    "buyer_order_id", "seller_order_id", "wash_cluster_size"]
+        for c in int_cols:
+            if c in pdf.columns:
+                pdf[c] = pdf[c].astype("Int64")
 
         os.makedirs(BQ_PARQUET_DIR, exist_ok=True)
         pq_path = os.path.join(BQ_PARQUET_DIR, f"batch_{batch_id}.parquet")
