@@ -7,7 +7,7 @@ PROCESSING LAYER — Spark Structured Streaming as the central brain:
   Stage 2: DATA PROCESSING (the core value of Spark):
      a. Parse & Type Cast     — Convert raw strings to proper types
      b. Data Cleansing        — Filter invalid/garbage records
-     c. Deduplication         — UUID5 idempotent key + dropDuplicates
+     c. Deduplication         — Composite Natural Key (Symbol + TradeID) + dropDuplicates
      d. Transformation        — Calculate derived columns (amount_usd)
      e. Categorization        — Volume classification (Retail → Whale)
      f. Anomaly Detection     — Flag abnormal trading patterns
@@ -58,14 +58,14 @@ KAFKA_TOPIC             = os.getenv("KAFKA_TOPIC", "payment_events_v3")
 # PostgreSQL (Primary Sink)
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
-PG_DB       = os.getenv("POSTGRES_DB", "paysim_dw")
-PG_USER     = os.getenv("POSTGRES_USER", "paysim")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "paysim123")
+PG_DB       = os.getenv("POSTGRES_DB", "binance_dw")
+PG_USER     = os.getenv("POSTGRES_USER", "binance")
+PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 # BigQuery (Backup Sink)
 BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID", "")
 BQ_DATASET    = os.getenv("BQ_DATASET", "paysim_dw")
-BQ_TABLE_FACT = "fact_binance_trades_v2"
+BQ_TABLE_FACT = "fact_binance_trades"
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 if GOOGLE_APPLICATION_CREDENTIALS and not os.path.isabs(GOOGLE_APPLICATION_CREDENTIALS):
@@ -100,12 +100,10 @@ raw_kafka_schema = StructType([
 # SPARK SESSION
 # =====================================================================
 def create_spark_session() -> SparkSession:
-    """Create Spark session with Windows compatibility fixes."""
-    os.environ["HADOOP_HOME"] = r"C:\Users\Admin\.hadoop"
-    if "JAVA_HOME" not in os.environ or "jdk-17" not in os.environ["JAVA_HOME"]:
-        os.environ["JAVA_HOME"] = r"C:\Users\Admin\.java\jdk-17.0.19+10"
-        
     if sys.platform.startswith('win'):
+        os.environ["HADOOP_HOME"] = r"C:\Users\Admin\.hadoop"
+        if "JAVA_HOME" not in os.environ or "jdk-17" not in os.environ["JAVA_HOME"]:
+            os.environ["JAVA_HOME"] = r"C:\Users\Admin\.java\jdk-17.0.19+10"
         os.environ['PATH'] = os.environ.get('PATH', '') + ';' + r'C:\Users\Admin\.hadoop\bin' + ';' + r'C:\Users\Admin\.java\jdk-17.0.19+10\bin'
         os.environ["SPARK_LOCAL_IP"] = "127.0.0.1"
         os.environ["SPARK_LOCAL_HOSTNAME"] = "127.0.0.1"
@@ -546,7 +544,7 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
         from pyspark.sql.functions import avg, stddev, count, abs as spark_abs, coalesce, col, when, lit
         
         w_symbol = Window.partitionBy("crypto_pair_key")
-        w_wash = Window.partitionBy("crypto_pair_key", "trade_time")
+        w_wash = Window.partitionBy("crypto_pair_key", "trade_time", "price", "quantity")
 
         enriched_df = (
             batch_df
@@ -568,7 +566,6 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             .withColumn("is_anomaly", when(
                 # --- NHÓM 1: POINT ANOMALIES (Bất thường điểm đơn lẻ) ---
                 (col("amount_usd") >= 1000000) |                                                   # Whale Alert (> 1M USD)
-                (col("amount_usd") < 0.01) |                                                       # Dust Trade (< 0.01 USD)
                 ((col("batch_count") > 30) & (col("z_score") > 3.0)) |                             # Z-Score Outlier (3-Sigma)
                 
                 # --- NHÓM 2: COLLECTIVE ANOMALIES (Bất thường nhóm/tập hợp) ---

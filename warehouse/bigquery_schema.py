@@ -43,7 +43,8 @@ def main():
         try:
             client.delete_table(f"{dataset_ref}.fact_transactions", not_found_ok=True)
             client.delete_table(f"{dataset_ref}.fact_binance_trades_v2", not_found_ok=True)
-            print("  Removed old tables to clean up schema.")
+            client.delete_table(f"{dataset_ref}.fact_pipeline_latency_v2", not_found_ok=True)
+            print("  Removed legacy v2 tables to clean up schema.")
         except Exception as e:
             pass
             
@@ -95,7 +96,7 @@ def main():
                 bigquery.SchemaField("vnd_rate", "FLOAT64"),
             ],
             # Fact table: All FKs are INTEGER surrogate keys
-            "fact_binance_trades_v2": [
+            "fact_binance_trades": [
                 bigquery.SchemaField("transaction_id", "STRING"),
                 bigquery.SchemaField("trade_id", "INT64"),
                 bigquery.SchemaField("date_key", "INT64"),
@@ -114,7 +115,7 @@ def main():
                 bigquery.SchemaField("buyer_order_id", "INT64"),
                 bigquery.SchemaField("seller_order_id", "INT64"),
             ],
-            "fact_pipeline_latency_v2": [
+            "fact_pipeline_latency": [
                 bigquery.SchemaField("latency_id", "INT64", mode="REQUIRED"),
                 bigquery.SchemaField("batch_id", "INT64"),
                 bigquery.SchemaField("sink_name", "STRING"),
@@ -129,7 +130,7 @@ def main():
             table = bigquery.Table(table_id, schema=schema)
             
             # Special configuration for the Fact table
-            if table_name == "fact_binance_trades_v2":
+            if table_name == "fact_binance_trades":
                 table.time_partitioning = bigquery.TimePartitioning(
                     type_=bigquery.TimePartitioningType.DAY,
                     field="trade_time"

@@ -22,9 +22,9 @@ if GOOGLE_APPLICATION_CREDENTIALS:
 # Cấu hình PG
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
-PG_DB       = os.getenv("POSTGRES_DB", "paysim_dw")
-PG_USER     = os.getenv("POSTGRES_USER", "paysim")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "paysim123")
+PG_DB       = os.getenv("POSTGRES_DB", "binance_dw")
+PG_USER     = os.getenv("POSTGRES_USER", "binance")
+PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 def main():
     print("="*60)
@@ -38,7 +38,7 @@ def main():
         print(f"[LỖI] Không thể kết nối BigQuery: {e}")
         return
 
-    source_table = f"{BQ_PROJECT_ID}.paysim_dw.fact_binance_trades_v2"
+    source_table = f"{BQ_PROJECT_ID}.paysim_dw.fact_binance_trades"
     print(f"1. Đang tải và lọc trùng lặp từ bảng: {source_table}...")
 
     # Câu lệnh SQL để tải và tự động khử trùng lặp (Dùng ROW_NUMBER)

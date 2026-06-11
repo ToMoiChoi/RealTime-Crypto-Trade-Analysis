@@ -42,8 +42,8 @@ TABLES_TO_SYNC = [
     # "dim_crypto_pair",
     # "dim_exchange_rate",
     # "dim_date",
-    "dim_time",
-    # "fact_binance_trades",
+    # "dim_time",
+    "fact_binance_trades",
     # "fact_pipeline_latency"
 ]                                                                                     
 

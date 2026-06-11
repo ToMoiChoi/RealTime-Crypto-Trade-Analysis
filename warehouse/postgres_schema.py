@@ -25,9 +25,9 @@ load_dotenv()
 
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
-PG_DB       = os.getenv("POSTGRES_DB", "paysim_dw")
-PG_USER     = os.getenv("POSTGRES_USER", "paysim")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "paysim123")
+PG_DB       = os.getenv("POSTGRES_DB", "binance_dw")
+PG_USER     = os.getenv("POSTGRES_USER", "binance")
+PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 DATABASE_URL = f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_PORT}/{PG_DB}"
 
@@ -36,6 +36,8 @@ DATABASE_URL = f"postgresql+psycopg2://{PG_USER}:{PG_PASSWORD}@{PG_HOST}:{PG_POR
 DROP_LEGACY_STATEMENTS = [
     "DROP TABLE IF EXISTS fact_pipeline_latency_v2 CASCADE;",
     "DROP TABLE IF EXISTS fact_binance_trades_v2 CASCADE;",
+    "DROP TABLE IF EXISTS fact_pipeline_latency CASCADE;",
+    "DROP TABLE IF EXISTS fact_binance_trades CASCADE;",
     "DROP TABLE IF EXISTS fact_transactions CASCADE;",
     "DROP TABLE IF EXISTS dim_exchange_rate CASCADE;",
     "DROP TABLE IF EXISTS dim_volume_category CASCADE;",
@@ -110,11 +112,11 @@ DDL_STATEMENTS = [
     );
     """,
 
-    # -- fact_binance_trades_v2 ----------------------------------------------
+    # -- fact_binance_trades ----------------------------------------------
     # Kimball: All FK references use INTEGER Surrogate Keys from Dimensions.
     # transaction_id is a Degenerate Dimension (kept in fact, no dim table).
     """
-    CREATE TABLE IF NOT EXISTS fact_binance_trades_v2 (
+    CREATE TABLE IF NOT EXISTS fact_binance_trades (
         transaction_id        VARCHAR(64) PRIMARY KEY,
         trade_id              BIGINT,
         date_key              BIGINT,
@@ -139,9 +141,9 @@ DDL_STATEMENTS = [
     );
     """,
 
-    # -- fact_pipeline_latency_v2 --------------------------------------------
+    # -- fact_pipeline_latency --------------------------------------------
     """
-    CREATE TABLE IF NOT EXISTS fact_pipeline_latency_v2 (
+    CREATE TABLE IF NOT EXISTS fact_pipeline_latency (
         latency_id       SERIAL PRIMARY KEY,
         batch_id         BIGINT,
         sink_name        VARCHAR(50),
@@ -152,10 +154,10 @@ DDL_STATEMENTS = [
     """,
 
     # -- Indexes ----------------------------------------------------------
-    "CREATE INDEX IF NOT EXISTS idx_binance_pair   ON fact_binance_trades_v2(crypto_pair_key);",
-    "CREATE INDEX IF NOT EXISTS idx_binance_time   ON fact_binance_trades_v2(trade_time);",
-    "CREATE INDEX IF NOT EXISTS idx_binance_amount ON fact_binance_trades_v2(amount_usd);",
-    "CREATE INDEX IF NOT EXISTS idx_binance_volcat ON fact_binance_trades_v2(volume_category_key);",
+    "CREATE INDEX IF NOT EXISTS idx_binance_pair   ON fact_binance_trades(crypto_pair_key);",
+    "CREATE INDEX IF NOT EXISTS idx_binance_time   ON fact_binance_trades(trade_time);",
+    "CREATE INDEX IF NOT EXISTS idx_binance_amount ON fact_binance_trades(amount_usd);",
+    "CREATE INDEX IF NOT EXISTS idx_binance_volcat ON fact_binance_trades(volume_category_key);",
 ]
 
 def main():
