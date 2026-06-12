@@ -545,7 +545,7 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
         
         w_symbol = Window.partitionBy("crypto_pair_key")
         w_wash = Window.partitionBy("crypto_pair_key", "trade_time", "price", "quantity")
-
+    
         enriched_df = (
             batch_df
             .withColumn("batch_count", count("trade_id").over(w_symbol))
@@ -562,14 +562,13 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             .withColumn("price_dev_pct", spark_abs(col("price") - col("batch_avg_price")) / col("batch_avg_price"))
             # 3. Wash Trade Clustering (Collective Anomaly)
             .withColumn("wash_cluster_size", count("trade_id").over(w_wash))
-            # Gắn cờ Anomaly theo các giả định phân phối dữ liệu từ Chandola (2009)
             .withColumn("is_anomaly", when(
                 # --- NHÓM 1: POINT ANOMALIES (Bất thường điểm đơn lẻ) ---
                 (col("amount_usd") >= 1000000) |                                                   # Whale Alert (> 1M USD)
                 ((col("batch_count") > 30) & (col("z_score") > 3.0)) |                             # Z-Score Outlier (3-Sigma)
                 
                 # --- NHÓM 2: COLLECTIVE ANOMALIES (Bất thường nhóm/tập hợp) ---
-                (col("wash_cluster_size") >= 4) |                                                  # Bot Wash Trade (Hành vi tần suất cao)
+                ((col("batch_count") > 30) & col("wash_cluster_size") >= 4) |                                                  # Bot Wash Trade (Hành vi tần suất cao)
                 
                 # --- NHÓM 3: CONTEXTUAL ANOMALIES (Bất thường ngữ cảnh trượt giá) ---
                 ((col("batch_count") > 30) & (col("price_dev_pct") > 0.01) & (col("amount_usd") > col("batch_mean_usd"))), # Trượt giá lớn đi kèm khối lượng cao trong micro-batch
@@ -579,7 +578,7 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             # Clean up memory (keep anomaly metrics for DB storage, drop temporary fields including batch_count)
             .drop("batch_mean_usd", "batch_std_usd", "batch_avg_price", "batch_count")
         )
-        logger.info(f"[Batch {batch_id}] Dynamic anomaly detection applied (Z-Score, Wash Trade, Slippage)")
+        logger.info(f"[Batch {batch_id}] Dynamic anomaly detection applied")
         rows = enriched_df.collect()
     except Exception as e:
         logger.error(f"[Batch {batch_id}] [ERROR] Dynamic anomaly detection failed, falling back: {e}")
