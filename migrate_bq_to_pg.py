@@ -38,7 +38,7 @@ def main():
         print(f"[LỖI] Không thể kết nối BigQuery: {e}")
         return
 
-    source_table = f"{BQ_PROJECT_ID}.paysim_dw.fact_binance_trades"
+    source_table = f"{BQ_PROJECT_ID}.binance_dw.fact_binance_trades"
     print(f"1. Đang tải và lọc trùng lặp từ bảng: {source_table}...")
 
     # Câu lệnh SQL để tải và tự động khử trùng lặp (Dùng ROW_NUMBER)

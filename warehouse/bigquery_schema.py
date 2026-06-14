@@ -19,7 +19,7 @@ from google.cloud import bigquery
 load_dotenv()
 
 PROJECT_ID = os.getenv("BQ_PROJECT_ID")
-DATASET_ID = os.getenv("BQ_DATASET", "paysim_dw")
+DATASET_ID = os.getenv("BQ_DATASET", "binance_dw")
 
 def main():
     if not PROJECT_ID:

@@ -24,14 +24,14 @@ if creds_path and not os.path.isabs(creds_path):
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = abs_creds_path
 
 BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
-BQ_DATASET    = os.getenv("BQ_DATASET", "paysim_dw")
+BQ_DATASET    = os.getenv("BQ_DATASET", "binance_dw")
 
 # PostgreSQL
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
-PG_DB       = os.getenv("POSTGRES_DB", "paysim_dw")
-PG_USER     = os.getenv("POSTGRES_USER", "paysim")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "paysim123")
+PG_DB       = os.getenv("POSTGRES_DB", "binance_dw")
+PG_USER     = os.getenv("POSTGRES_USER", "binance")
+PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 if not BQ_PROJECT_ID:
     print("[ERROR] BQ_PROJECT_ID is not configured in .env")
@@ -44,7 +44,7 @@ TABLES_TO_SYNC = [
     # "dim_date",
     # "dim_time",
     "fact_binance_trades",
-    # "fact_pipeline_latency"
+    "fact_pipeline_latency"
 ]                                                                                     
 
 def sync_table(table_name, db_url):

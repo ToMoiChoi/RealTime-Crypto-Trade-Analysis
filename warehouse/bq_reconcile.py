@@ -36,7 +36,7 @@ logger = logging.getLogger("BQReconcile")
 # --- Configuration ----------------------------------------------------
 load_dotenv()
 PROJECT_ID              = os.getenv("BQ_PROJECT_ID", "")
-DATASET_ID              = os.getenv("BQ_DATASET", "paysim_dw")
+DATASET_ID              = os.getenv("BQ_DATASET", "binance_dw")
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 KAFKA_TOPIC             = os.getenv("KAFKA_TOPIC", "payment_events_v3")
 MATCH_THRESHOLD         = float(os.getenv("RECONCILE_THRESHOLD", "0.90"))  # 90%

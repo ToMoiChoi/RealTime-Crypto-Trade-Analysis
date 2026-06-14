@@ -15,8 +15,11 @@ Kimball Methodology:
 """
 
 import os
+import sys
 import random
-from datetime import date, timedelta
+import urllib.request
+import json
+from datetime import date, timedelta, datetime
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -25,8 +28,12 @@ from google.cloud import bigquery
 # --- 1. Load config ---
 load_dotenv()
 
+# Sửa lỗi in tiếng Việt trên console Windows
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+
 BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
-BQ_DATASET    = os.getenv("BQ_DATASET", "paysim_dw")
+BQ_DATASET    = os.getenv("BQ_DATASET", "binance_dw")
 
 
 # --- 2. Static Data (Kimball Surrogate Keys) ---
@@ -87,6 +94,29 @@ def main():
     start_dt = date(2024, 1, 1)
     end_dt   = date(2030, 12, 31)
 
+    # Helper function to fetch real exchange rates
+    def fetch_real_exchange_rates():
+        print("    [FETCH] Đang tải tỷ giá USD/VND thật từ Yahoo Finance (01/2026 - 06/2026)...")
+        rates_dict = {}
+        try:
+            # period1: 2026-01-01 (1767225600), period2: 2026-06-30 (1782864000)
+            url = "https://query1.finance.yahoo.com/v8/finance/chart/USDVND=X?period1=1767225600&period2=1782864000&interval=1d"
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=15) as response:
+                res_data = json.loads(response.read())['chart']['result'][0]
+                timestamps = res_data.get('timestamp', [])
+                close_prices = res_data.get('indicators', {}).get('quote', [{}])[0].get('close', [])
+                
+                for t, val in zip(timestamps, close_prices):
+                    if val is not None:
+                        dt = datetime.fromtimestamp(t)
+                        date_key = int(dt.strftime("%Y%m%d"))
+                        rates_dict[date_key] = round(float(val), 2)
+            print(f"    [OK] Tải thành công {len(rates_dict)} ngày tỷ giá thật.")
+        except Exception as e:
+            print(f"    [WARN] Không thể tải tỷ giá thật từ Yahoo Finance: {e}. Sẽ dùng giả lập làm fallback.")
+        return rates_dict
+
     # ------------------------------------------------------------------
     # 1. dim_date & 2. dim_exchange_rate
     # ------------------------------------------------------------------
@@ -95,7 +125,13 @@ def main():
     fx_rows = []
 
     current_date = start_dt
+    real_rates = fetch_real_exchange_rates()
+    
+    # Initialize simulation rate
     current_rate = 24500.0
+    last_real_rate = 25000.0
+    if real_rates:
+        last_real_rate = real_rates[min(real_rates.keys())]
 
     while current_date <= end_dt:
         date_key = int(current_date.strftime("%Y%m%d"))
@@ -111,14 +147,29 @@ def main():
             "year": current_date.year,
         })
 
-        fluctuation = random.uniform(-15.0, 15.0)
-        current_rate += fluctuation
-        current_rate = max(23000.0, min(current_rate, 26500.0))
+        # Check if date falls in the focus period: January to June 2026
+        is_focus_period = (current_date.year == 2026 and 1 <= current_date.month <= 6)
+        
+        if is_focus_period and real_rates:
+            if date_key in real_rates:
+                rate_val = real_rates[date_key]
+                last_real_rate = rate_val
+            else:
+                # Forward-fill for weekends/holidays
+                rate_val = last_real_rate
+            # Keep simulation aligned with real rates when exiting the focus period
+            current_rate = rate_val
+        else:
+            # Random Walk simulation elsewhere (declared limitation fallback)
+            fluctuation = random.uniform(-15.0, 15.0)
+            current_rate += fluctuation
+            current_rate = max(23000.0, min(current_rate, 26500.0))
+            rate_val = round(current_rate, 2)
 
         fx_rows.append({
             "date_key": date_key,
             "currency_code": "VND",
-            "vnd_rate": round(current_rate, 2)
+            "vnd_rate": rate_val
         })
 
         current_date += timedelta(days=1)

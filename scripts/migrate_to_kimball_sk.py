@@ -22,9 +22,9 @@ load_dotenv()
 
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
-PG_DB       = os.getenv("POSTGRES_DB", "paysim_dw")
-PG_USER     = os.getenv("POSTGRES_USER", "paysim")
-PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "paysim123")
+PG_DB       = os.getenv("POSTGRES_DB", "binance_dw")
+PG_USER     = os.getenv("POSTGRES_USER", "binance")
+PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 
 # Surrogate Key mappings (must match seed_dimensions scripts)

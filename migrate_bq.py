@@ -24,8 +24,8 @@ except Exception as e:
     exit(1)
 
 # 2. Cấu hình bảng nguồn và bảng đích
-source_table = f"{BQ_PROJECT_ID}.paysim_dw.fact_binance_trades_v02"
-dest_table = f"{BQ_PROJECT_ID}.paysim_dw.fact_binance_trades"
+source_table = f"{BQ_PROJECT_ID}.binance_dw.fact_binance_trades_v02"
+dest_table = f"{BQ_PROJECT_ID}.binance_dw.fact_binance_trades"
 
 print(f"Đang chuẩn bị copy dữ liệu:")
 print(f"  Từ: {source_table}")

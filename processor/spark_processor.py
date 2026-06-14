@@ -64,7 +64,7 @@ PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 # BigQuery (Backup Sink)
 BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID", "")
-BQ_DATASET    = os.getenv("BQ_DATASET", "paysim_dw")
+BQ_DATASET    = os.getenv("BQ_DATASET", "binance_dw")
 BQ_TABLE_FACT = "fact_binance_trades"
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
@@ -129,6 +129,8 @@ def create_spark_session() -> SparkSession:
         .config("spark.locality.wait", "0s")
         # Adaptive Query Execution: auto-optimize shuffle partitions at runtime
         .config("spark.sql.adaptive.enabled", "true")
+        # Bypass state schema compatibility check to allow upgrade of deduplication operator
+        .config("spark.sql.streaming.stateStore.stateSchemaCheck", "false")
         # Windows NullPointerException fixes
         .config("spark.driver.host", "127.0.0.1")
         .config("spark.driver.bindAddress", "127.0.0.1")
@@ -199,7 +201,7 @@ def process_raw_to_fact(spark: SparkSession, raw_df: DataFrame) -> DataFrame:
             concat_ws("_", col("crypto_symbol"), col("trade_id").cast("string"))
         )
         .withWatermark("trade_time", "30 seconds")
-        .dropDuplicates(["transaction_id"])
+        .dropDuplicatesWithinWatermark(["transaction_id"])
     )
     logger.info("[PROCESSING] Step 3: Deduplication Layer 1 (Stateful Spark) completed")
 
@@ -299,7 +301,7 @@ PG_POOL_LOCK = threading.Lock()
 
 
 def _get_pg_pool():
-    """
+    """ 
     Khởi tạo PostgreSQL Connection Pool theo mẫu thiết kế Singleton (Thread-Safe).
     - Tạo sẵn từ 1 đến 5 kết nối tồn tại lâu dài (Persistent Connections).
     - Triệt tiêu hoàn toàn chi phí bắt tay TCP Handshake (~50-100ms) ở mỗi micro-batch.
@@ -554,7 +556,7 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             .withColumn("batch_mean_usd", avg("amount_usd").over(w_symbol))
             .withColumn("batch_std_usd", coalesce(stddev("amount_usd").over(w_symbol), lit(1.0)))
             .withColumn("batch_std_usd", when(col("batch_std_usd") == 0, lit(1.0)).otherwise(col("batch_std_usd")))
-            .withColumn("z_score", when(col("batch_count") > 10, 
+            .withColumn("z_score", when(col("batch_count") > 30, 
                                          (col("amount_usd") - col("batch_mean_usd")) / col("batch_std_usd"))
                                    .otherwise(lit(0.0)))
             # 2. Price Slippage / Market Impact (Contextual Anomaly)
@@ -566,10 +568,8 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
                 # --- NHÓM 1: POINT ANOMALIES (Bất thường điểm đơn lẻ) ---
                 (col("amount_usd") >= 1000000) |                                                   # Whale Alert (> 1M USD)
                 ((col("batch_count") > 30) & (col("z_score") > 3.0)) |                             # Z-Score Outlier (3-Sigma)
-                
                 # --- NHÓM 2: COLLECTIVE ANOMALIES (Bất thường nhóm/tập hợp) ---
-                ((col("batch_count") > 30) & col("wash_cluster_size") >= 4) |                                                  # Bot Wash Trade (Hành vi tần suất cao)
-                
+                ((col("batch_count") > 30) & (col("wash_cluster_size") >= 4) & (col("amount_usd") >= 500.0)) | # Bot Wash Trade (Hành vi tần suất cao với volume đáng kể)                
                 # --- NHÓM 3: CONTEXTUAL ANOMALIES (Bất thường ngữ cảnh trượt giá) ---
                 ((col("batch_count") > 30) & (col("price_dev_pct") > 0.01) & (col("amount_usd") > col("batch_mean_usd"))), # Trượt giá lớn đi kèm khối lượng cao trong micro-batch
                 lit(True)
@@ -578,11 +578,20 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             # Clean up memory (keep anomaly metrics for DB storage, drop temporary fields including batch_count)
             .drop("batch_mean_usd", "batch_std_usd", "batch_avg_price", "batch_count")
         )
-        logger.info(f"[Batch {batch_id}] Dynamic anomaly detection applied")
         rows = enriched_df.collect()
+        total_rows = len(rows)
+        anomaly_count = sum(1 for r in rows if r.is_anomaly)
+        anomaly_rate = (anomaly_count / total_rows * 100) if total_rows > 0 else 0.0
+        logger.info(f"[Batch {batch_id}] Dynamic anomaly detection applied | Total rows: {total_rows} | Anomaly rate: {anomaly_rate:.2f}% ({anomaly_count} anomalies)")
     except Exception as e:
         logger.error(f"[Batch {batch_id}] [ERROR] Dynamic anomaly detection failed, falling back: {e}")
-        rows = batch_df.collect()
+        fallback_df = (
+            batch_df
+            .withColumn("z_score", lit(0.0))
+            .withColumn("price_dev_pct", lit(0.0))
+            .withColumn("wash_cluster_size", lit(0))
+        )
+        rows = fallback_df.collect()
 
     row_count = len(rows)
 
@@ -604,7 +613,7 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             current_buffer_size = len(BQ_BUFFER)
             time_since_last_upload = time.time() - LAST_BQ_UPLOAD_TIME
 
-        if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT:
+        if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT or time_since_last_upload >= BQ_UPLOAD_INTERVAL_SEC:
             with BQ_BUFFER_LOCK:
                 upload_data = BQ_BUFFER.copy()
                 BQ_BUFFER.clear()

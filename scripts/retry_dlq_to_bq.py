@@ -12,6 +12,8 @@ import os
 import glob
 import shutil
 import logging
+import json
+import urllib.request
 from dotenv import load_dotenv
 from google.cloud import bigquery
 
@@ -23,6 +25,48 @@ logging.basicConfig(
 )
 logger = logging.getLogger("RetryDLQ_SelfHealing")
 
+def send_alert(message, webhook_url=None, telegram_token=None, telegram_chat_id=None):
+    """Gửi cảnh báo đến Discord hoặc Telegram sử dụng thư viện chuẩn urllib của Python."""
+    if not message:
+        return
+
+    # 1. Gửi qua Discord Webhook
+    if webhook_url:
+        try:
+            payload = {"content": f"⚠️ **[PIPELINE ALERT]** {message}"}
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                webhook_url,
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                response.read()
+            logger.info("Alert sent to Discord successfully.")
+        except Exception as e:
+            logger.error(f"Failed to send alert to Discord: {e}")
+
+    # 2. Gửi qua Telegram
+    if telegram_token and telegram_chat_id:
+        try:
+            url = f"https://api.telegram.org/bot{telegram_token}/sendMessage"
+            payload = {
+                "chat_id": telegram_chat_id,
+                "text": f"⚠️ *[PIPELINE ALERT]*\n{message}",
+                "parse_mode": "Markdown"
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                response.read()
+            logger.info("Alert sent to Telegram successfully.")
+        except Exception as e:
+            logger.error(f"Failed to send alert to Telegram: {e}")
+
 def main():
     # 1. Setup paths
     PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -33,9 +77,24 @@ def main():
     
     # 2. Get BigQuery configs
     BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
-    BQ_DATASET    = os.getenv("BQ_DATASET", "paysim_dw")
+    BQ_DATASET    = os.getenv("BQ_DATASET", "binance_dw")
     BQ_TABLE_FACT = "fact_binance_trades"
     GOOGLE_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
+
+    # Get Alerting configs
+    DISCORD_WEBHOOK = os.getenv("ALERT_DISCORD_WEBHOOK_URL", "")
+    TELEGRAM_TOKEN  = os.getenv("ALERT_TELEGRAM_TOKEN", "")
+    TELEGRAM_CHAT_ID = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+    
+    try:
+        MAX_DLQ_FILES = int(os.getenv("ALERT_MAX_DLQ_FILES", "20"))
+    except ValueError:
+        MAX_DLQ_FILES = 20
+        
+    try:
+        MIN_DISK_FREE_PERCENT = float(os.getenv("ALERT_MIN_DISK_FREE_PERCENT", "10.0"))
+    except ValueError:
+        MIN_DISK_FREE_PERCENT = 10.0
 
     if not BQ_PROJECT_ID:
         logger.error("BQ_PROJECT_ID is not set in .env")
@@ -65,6 +124,23 @@ def main():
     # Ignore any residual combined temporary files
     parquet_files = [f for f in parquet_files if "temp_combined_retry" not in os.path.basename(f)]
     
+    # --- HEALTH CHECKS ---
+    # Check 1: Disk Free Space
+    try:
+        total, used, free = shutil.disk_usage(DLQ_DIR)
+        free_percent = (free / total) * 100
+        if free_percent < MIN_DISK_FREE_PERCENT:
+            msg = f"Dung lượng đĩa trống quá thấp! Còn lại {free_percent:.2f}% ({free // (2**30)} GB / {total // (2**30)} GB)."
+            send_alert(msg, DISCORD_WEBHOOK, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+    except Exception as e:
+        logger.error(f"Failed to check disk usage: {e}")
+
+    # Check 2: DLQ Queue Size Threshold
+    dlq_size = len(parquet_files)
+    if dlq_size >= MAX_DLQ_FILES:
+        msg = f"Số lượng file lô lỗi trong thư mục DLQ vượt ngưỡng an toàn! Số lượng hiện tại: {dlq_size} files (Ngưỡng: {MAX_DLQ_FILES})."
+        send_alert(msg, DISCORD_WEBHOOK, TELEGRAM_TOKEN, TELEGRAM_CHAT_ID)
+        
     if not parquet_files:
         logger.info("No failed parquet files found in DLQ directory. Everything is up to date!")
         return
