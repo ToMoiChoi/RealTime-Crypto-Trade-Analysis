@@ -6,27 +6,6 @@ Hệ thống Data Pipeline xử lý luồng (streaming data pipeline) thời gia
 
 ---
 
-## 📊 Dashboards & Analytics
-
-*(PowerBI Visualizations được liên kết trực tiếp với BigQuery Data Warehouse)*
-
-### 1. Thanh Khoản & Dòng Tiền (Liquidity & Cash Flow)
-![Thanh khoản & dòng tiền](img/Thanh%20kho%E1%BA%A3n%20&%20d%C3%B2ng%20ti%E1%BB%81n.png)
-
-### 2. Hành Vi Cá Mập (Whale Behavior)
-![Hành vi Cá Mập](img/H%C3%A0nh%20vi%20C%C3%A1%20M%E1%BA%ADp%20.png)
-
-### 3. Cảnh Báo Rủi Ro & Bất Thường (Risk & Anomaly Warnings)
-![Cảnh báo rủi ro & Bất thường](img/C%E1%BA%A3nh%20b%C3%A1o%20r%E1%BB%A7i%20ro%20&%20B%E1%BA%A5t%20th%C6%B0%E1%BB%9Dng.png)
-
-### 4. Phát Hiện BOT Thao Túng (Wash Trade / Bot Manipulation)
-![Phát hiện BOT thao túng](img/Ph%C3%A1t%20hi%E1%BB%87n%20BOT%20thao%20t%C3%BAng.png)
-
-### 5. Hiệu Năng Pipeline (Pipeline Performance & Latency)
-![Hiệu năng pipeline](img/Hi%E1%BB%87u%20n%C4%83ng%20pipeline.png)
-
----
-
 ## 🏗 Kiến Trúc Hệ Thống (System Diagram)
 
 Hệ thống được chia thành 5 tầng rõ rệt theo mô hình Lambda thu nhỏ định hướng luồng (streaming-first architecture):
@@ -301,6 +280,27 @@ Hệ thống lưu trữ song song (Dual-Sink) nhằm giải quyết cả hai bà
 | **Khử trùng lặp** | `ON CONFLICT (transaction_id) DO UPDATE` | `WRITE_APPEND` (Khử trùng khi đồng bộ ngoại tuyến) |
 | **Cơ chế kháng lỗi** | Tự động Rollback Transaction khi lỗi lô | Chuyển file Parquet lỗi vào thư mục DLQ cục bộ |
 | **Khôi phục lỗi** | Dựa trên checkpoint của Spark | Sử dụng script tự chữa lành `scripts/retry_dlq_to_bq.py` |
+
+---
+
+## 📊 Dashboards & Analytics
+
+*(PowerBI Visualizations được liên kết trực tiếp với BigQuery Data Warehouse)*
+
+### 1. Thanh Khoản & Dòng Tiền (Liquidity & Cash Flow)
+![Thanh khoản & dòng tiền](img/Thanh%20kho%E1%BA%A3n%20&%20d%C3%B2ng%20ti%E1%BB%81n.png)
+
+### 2. Hành Vi Cá Mập (Whale Behavior)
+![Hành vi Cá Mập](img/H%C3%A0nh%20vi%20C%C3%A1%20M%E1%BA%ADp%20.png)
+
+### 3. Cảnh Báo Rủi Ro & Bất Thường (Risk & Anomaly Warnings)
+![Cảnh báo rủi ro & Bất thường](img/C%E1%BA%A3nh%20b%C3%A1o%20r%E1%BB%A7i%20ro%20&%20B%E1%BA%A5t%20th%C6%B0%E1%BB%9Dng.png)
+
+### 4. Phát Hiện BOT Thao Túng (Wash Trade / Bot Manipulation)
+![Phát hiện BOT thao túng](img/Ph%C3%A1t%20hi%E1%BB%87n%20BOT%20thao%20t%C3%BAng.png)
+
+### 5. Hiệu Năng Pipeline (Pipeline Performance & Latency)
+![Hiệu năng pipeline](img/Hi%E1%BB%87u%20n%C4%83ng%20pipeline.png)
 
 ---
 
