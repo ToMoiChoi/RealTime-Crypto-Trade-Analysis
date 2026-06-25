@@ -17,6 +17,8 @@ import json
 import os
 import sys
 import time
+import urllib.request
+import threading
 from datetime import datetime
 
 from dotenv import load_dotenv
@@ -33,6 +35,10 @@ KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "payment_events_v3")
 MAX_RETRIES         = int(os.getenv("MAX_RETRIES", "10"))
 RETRY_INTERVAL_SEC  = int(os.getenv("RETRY_INTERVAL_SEC", "5"))
 
+# Telegram Alerting Configuration
+TELEGRAM_TOKEN = os.getenv("ALERT_TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+
 # --- Binance WebSocket Config -----------------------------------------
 # Crypto trading pairs monitored (real-time, public data)
 SYMBOLS = ["btcusdt", "ethusdt", "bnbusdt", "solusdt", "xrpusdt"]
@@ -42,6 +48,33 @@ BINANCE_WS_URL = (
     "wss://stream.binance.com:9443/stream?streams="
     + "/".join(f"{s}@trade" for s in SYMBOLS)
 )
+
+
+def send_telegram_alert(message: str):
+    """Gửi cảnh báo đến Telegram bất đồng bộ để tránh làm nghẽn luồng chính."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    def _send():
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                response.read()
+        except Exception as e:
+            print(f"   [WARN] Failed to send Telegram alert: {e}")
+
+    threading.Thread(target=_send, daemon=True).start()
 
 
 # --- Kafka Producer ---------------------------------------------------
@@ -64,6 +97,8 @@ def create_kafka_producer() -> KafkaProducer:
                   f"(attempt {attempt}/{MAX_RETRIES})...")
             time.sleep(RETRY_INTERVAL_SEC)
 
+    msg = f"🚨 *[Binance Producer CRITICAL]*\nKhông thể kết nối đến Kafka broker `{KAFKA_BOOTSTRAP_SERVERS}` sau {MAX_RETRIES} lần thử. Hệ thống thu thập dữ liệu bị DỪNG!"
+    send_telegram_alert(msg)
     raise ConnectionError(f"[ERROR] Could not connect to Kafka after {MAX_RETRIES} attempts")
 
 
@@ -181,14 +216,30 @@ def main():
 
     def on_error(ws, error):
         print(f"\n[WARN] WebSocket error: {error}")
+        msg = f"⚠️ *[Binance Producer WS Error]*\nLỗi kết nối WebSocket: `{error}`"
+        send_telegram_alert(msg)
 
     def on_close(ws, close_status_code, close_msg):
         print(f"\n[CLOSE] WebSocket connection closed. Code: {close_status_code}, Msg: {close_msg}")
         print(f"   Total trades sent: {count:,}")
+        msg = (
+            f"🚨 *[Binance Producer Closed]*\n"
+            f"Kết nối WebSocket bị đóng.\n"
+            f"Mã trạng thái: `{close_status_code}`\n"
+            f"Lý do: `{close_msg}`\n"
+            f"Tổng số giao dịch đã gửi: `{count:,}`"
+        )
+        send_telegram_alert(msg)
 
     def on_open(ws):
         print("\n[OPEN] Binance WebSocket CONNECTED. Receiving live RAW data...")
         print("-" * 70)
+        msg = (
+            f"🚀 *[Binance Producer Started]*\n"
+            f"Đã mở kết nối đến Binance WebSocket thành công.\n"
+            f"Các cặp đang theo dõi: `{', '.join(s.upper() for s in SYMBOLS)}`"
+        )
+        send_telegram_alert(msg)
 
     # 4. Run WebSocket (blocking, with auto-reconnect)
     try:

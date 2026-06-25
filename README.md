@@ -1,164 +1,214 @@
-# Real-time Crypto Data Pipeline: Binance Trade Analysis & Anomaly Detection
+# Real-Time Crypto Data Pipeline: Binance Trade Ingestion, Anomaly Detection & Dual-Sink Data Warehouse
 
 **🎬 Demo Video:** [https://www.youtube.com/watch?v=GCkgsPlZs2A](https://www.youtube.com/watch?v=GCkgsPlZs2A)
 
-A real-time streaming data pipeline for cryptocurrency market data, built on **Kimball Star Schema** methodology. The system ingests live trade data from Binance WebSocket, processes it through Apache Spark Structured Streaming with a 7-step transformation pipeline, applies dynamic statistical anomaly detection, and stores results in a dual-sink architecture (PostgreSQL + Google BigQuery).
+Hệ thống Data Pipeline xử lý luồng (streaming data pipeline) thời gian thực cho dữ liệu giao dịch tiền mã hóa (Cryptocurrency) từ sàn Binance. Dự án được thiết kế theo mô hình kho dữ liệu chuẩn **Kimball Star Schema** và tích hợp bộ xử lý trung tâm **Apache Spark Structured Streaming** cùng cơ chế giám sát cảnh báo qua **Telegram Bot**.
 
 ---
 
 ## 📊 Dashboards & Analytics
 
-*(PowerBI Visualizations powered by BigQuery Data Warehouse)*
+*(PowerBI Visualizations được liên kết trực tiếp với BigQuery Data Warehouse)*
 
 ### 1. Thanh Khoản & Dòng Tiền (Liquidity & Cash Flow)
-
 ![Thanh khoản & dòng tiền](img/Thanh%20kho%E1%BA%A3n%20&%20d%C3%B2ng%20ti%E1%BB%81n.png)
 
 ### 2. Hành Vi Cá Mập (Whale Behavior)
-
 ![Hành vi Cá Mập](img/H%C3%A0nh%20vi%20C%C3%A1%20M%E1%BA%ADp%20.png)
 
 ### 3. Cảnh Báo Rủi Ro & Bất Thường (Risk & Anomaly Warnings)
-
 ![Cảnh báo rủi ro & Bất thường](img/C%E1%BA%A3nh%20b%C3%A1o%20r%E1%BB%A7i%20ro%20&%20B%E1%BA%A5t%20th%C6%B0%E1%BB%9Dng.png)
 
 ### 4. Phát Hiện BOT Thao Túng (Wash Trade / Bot Manipulation)
-
 ![Phát hiện BOT thao túng](img/Ph%C3%A1t%20hi%E1%BB%87n%20BOT%20thao%20t%C3%BAng.png)
 
 ### 5. Hiệu Năng Pipeline (Pipeline Performance & Latency)
-
 ![Hiệu năng pipeline](img/Hi%E1%BB%87u%20n%C4%83ng%20pipeline.png)
 
 ---
 
-## 🏗 Architecture
+## 🏗 Kiến Trúc Hệ Thống (System Diagram)
+
+Hệ thống được chia thành 5 tầng rõ rệt theo mô hình Lambda thu nhỏ định hướng luồng (streaming-first architecture):
 
 ```mermaid
 graph TD
-    A["🔗 Binance WebSocket<br/>(5 pairs, public, no API key)"] -->|Raw JSON| B["📡 Kafka Producer<br/>(live_producer.py)"]
-    B -->|"Topic: payment_events_v3<br/>(lz4 compressed)"| C["⚡ Spark Structured Streaming<br/>(spark_processor.py)"]
+    classDef external fill:#F3F4F6,stroke:#4B5563,stroke-width:2px;
+    classDef broker fill:#FFE4E6,stroke:#F43F5E,stroke-width:2px;
+    classDef processing fill:#E0F2FE,stroke:#0EA5E9,stroke-width:2px;
+    classDef storage fill:#D1FAE5,stroke:#10B981,stroke-width:2px;
+    classDef alert fill:#FEF3C7,stroke:#D97706,stroke-width:2px;
 
-    subgraph SPARK ["Stage 2: Data Processing (7 Steps)"]
-        direction TB
-        S1["1. Type Casting<br/>string → numeric"] --> S2["2. Data Cleansing<br/>filter invalid records"]
-        S2 --> S3["3. Deduplication<br/>Concat Key + 30s watermark"]
-        S3 --> S4["4. Transformation<br/>price × quantity = amount_usd"]
-        S4 --> S5["5. Volume Classification<br/>SK: 1=RETAIL, 2=PRO, 3=INST, 4=WHALE"]
-        S5 --> S6["6. Dynamic Anomaly Detection<br/>Z-Score, Slippage, Wash Trade"]
-        S6 --> S7["7. Star Schema Keys<br/>date_key, time_key, crypto_pair_key"]
+    %% Nodes
+    BinanceWS["🔗 Binance WebSocket API<br/>(btcusdt, ethusdt, bnbusdt, solusdt, xrpusdt)"]:::external
+    
+    subgraph Ingestion ["Tầng Thu thập (Ingestion)"]
+        Producer["📡 Live Producer<br/>(producer/live_producer.py)"]:::processing
     end
 
-    C --> SPARK
+    Kafka["📡 Apache Kafka Broker<br/>(Topic: payment_events_v3<br/>LZ4 Compression)"]:::broker
 
-    SPARK -->|"Primary Sink<br/>(sync UPSERT)"| E[("🐘 PostgreSQL<br/>fact_binance_trades")]
-    SPARK -->|"Backup Sink<br/>(async Parquet + DLQ)"| F["☁️ Google BigQuery"]
-    F --> G["📊 Power BI Dashboard"]
+    subgraph Streaming ["Tầng Xử lý Luồng (Spark Processing)"]
+        SparkEngine["⚡ Spark Structured Streaming<br/>(processor/spark_processor.py)"]:::processing
+        Checkpoint["📂 Spark Checkpoint<br/>(State Store - local)"]:::processing
+    end
+
+    subgraph Storage ["Tầng Lưu trữ DW (Dual-Sink)"]
+        Postgres[("🐘 PostgreSQL DW<br/>(Real-time UPSERT)")]:::storage
+        BQ[("☁️ Google BigQuery DW<br/>(Backup Sink - Parquet load)")]:::storage
+        DLQ["📂 Local DLQ<br/>(dlq_bq_failed/)"]:::storage
+    end
+
+    subgraph Monitoring ["Tầng Giám sát & Cảnh báo"]
+        Telegram["💬 Telegram Bot Channel<br/>(Real-time Alerts)"]:::alert
+    end
+
+    %% Flows
+    BinanceWS -->|Raw JSON Stream| Producer
+    Producer -->|LZ4 Compressed Msg| Kafka
+    Kafka -->|Micro-batch Ingestion| SparkEngine
+    SparkEngine <--> Checkpoint
+    
+    SparkEngine -->|1. Real-time UPSERT| Postgres
+    SparkEngine -->|2. Buffered PyArrow Parquet| BQ
+    SparkEngine -.->|Nếu BQ Down: Lưu DLQ| DLQ
+    
+    %% Alerts
+    Producer -.->|Mất kết nối / Lỗi Broker| Telegram
+    SparkEngine -.->|Phát hiện Whale / Wash Trade / Slippage| Telegram
+    SparkEngine -.->|Lỗi ghi BQ -> Kích hoạt DLQ| Telegram
 ```
 
 ---
 
-## ⚙ Data Processing Pipeline (7 Steps)
+## 📁 Cấu Trúc Dự Án (Project Directory Structure)
 
-All processing is performed in **Spark Structured Streaming** (`spark_processor.py`).
+Mã nguồn được cấu trúc hóa theo nguyên lý phân lớp chức năng rõ rệt, cô lập logic xử lý dữ liệu với cơ sở hạ tầng:
 
-| Step | Operation | Description |
+```
+├── producer/
+│   ├── __init__.py
+│   └── live_producer.py         # Kết nối websocket Binance, đẩy dữ liệu thô dạng Bytes/LZ4 vào Kafka.
+├── processor/
+│   ├── __init__.py
+│   └── spark_processor.py       # Bộ xử lý trung tâm Spark Streaming (Làm sạch, Phân loại, Phát hiện bất thường & Dual-Sink).
+├── warehouse/
+│   ├── __init__.py
+│   ├── postgres_schema.py       # Định nghĩa lược đồ Star Schema (DDL) trên PostgreSQL.
+│   ├── bigquery_schema.py       # Định nghĩa lược đồ Star Schema trên Google BigQuery.
+│   ├── seed_dimensions_pg.py    # Nạp dữ liệu danh mục tĩnh (dim_date, dim_time, dim_crypto_pair...) vào Postgres.
+│   ├── seed_dimensions_bq.py    # Nạp dữ liệu danh mục tĩnh vào Google BigQuery.
+│   └── bq_reconcile.py          # Đối soát số lượng tin nhắn giữa Kafka và Google BigQuery.
+├── scripts/
+│   ├── check_pg_data.py         # Truy vấn nhanh dữ liệu PostgreSQL DW phục vụ kiểm thử.
+│   ├── inject_anomalies.py      # Bơm (inject) dữ liệu bất thường nhân tạo vào Kafka để test bộ lọc.
+│   ├── evaluate_anomalies.py     # Đo lường và đánh giá tỷ lệ bắt chính xác bất thường thống kê.
+│   ├── sensitivity_analysis.py  # Phân tích độ nhạy của tham số (Z-Score threshold, Wash trade size).
+│   ├── retry_dlq_to_bq.py       # Tự động hóa quét DLQ và tải bù dữ liệu lên BigQuery (Self-Healing).
+│   ├── pg_to_bq_sync.py         # Script đồng bộ dữ liệu ngoại tuyến từ PostgreSQL sang BigQuery.
+│   └── hard_reset_spark.py      # Reset nhanh Spark checkpoint và bộ nhớ đệm cục bộ khi cần chạy lại.
+├── Makefile                     # Quản lý tất cả các lệnh triển khai, chạy và kiểm tra hệ thống.
+├── docker-compose.yml           # Triển khai môi trường ảo (Kafka, Zookeeper, PostgreSQL).
+├── requirements.txt             # Định nghĩa thư viện Python của hệ thống.
+└── .env                         # Tệp cấu hình các biến môi trường hệ thống.
+```
+
+---
+
+## ⚙️ Quy Trình Xử Lý Dữ Liệu 7 Bước (7-Step Pipeline)
+
+Toàn bộ luồng tính toán dữ liệu của **Spark Structured Streaming** (`processor/spark_processor.py`) tuân thủ nghiêm ngặt mô hình xử lý phân đoạn để tối ưu hóa bộ nhớ:
+
+| Bước | Tác vụ | Mô tả chi tiết |
 |------|-----------|-------------|
-| 1 | Type Casting | Convert Binance string fields (price, quantity) to numeric types. |
-| 2 | Data Cleansing | Filter invalid records (price ≤ 0, quantity ≤ 0, nulls). |
-| 3 | Deduplication | Concat crypto_symbol_trade_id + 30-second watermark + dropDuplicates. |
-| 4 | Transformation | Calculate amount_usd = price × quantity. |
-| 5 | Volume Classification | Map amount_usd → Surrogate Key (1=RETAIL, 2=PRO, 3=INSTITUTIONAL, 4=WHALE). |
-| 6 | Anomaly Detection | Dynamic evaluation via foreachBatch using Window functions (Z-score, Wash trade clustering, Slippage). |
-| 7 | Star Schema Keys | Generate date_key (yyyyMMdd), time_key (HHmm), and lookup crypto_pair_key. |
+| **1** | **Type Casting** | Ép kiểu dữ liệu dạng chuỗi (String) nhận từ Binance sang kiểu số học phù hợp (Double, Long). |
+| **2** | **Data Cleansing** | Loại bỏ dữ liệu nhiễu/lỗi mạng (chấp nhận giá trị `price > 0`, `quantity > 0` và không trống `Null`). |
+| **3** | **Deduplication** | Kết hợp Khóa ghép tự nhiên (Natural Composite Key: `crypto_symbol` + `trade_id`) + Cơ chế cửa sổ Watermark 30 giây để lọc bỏ các giao dịch gửi trùng lắp. |
+| **4** | **Transformation** | Tính toán trường thông tin phái sinh: Tổng giá trị giao dịch bằng USD ($Amount_{USD} = Price \times Quantity$). |
+| **5** | **Volume Classification** | Phân hạng quy mô giao dịch theo Surrogate Key: `1=RETAIL` (<$10k), `2=PRO` ($10k-$100k), `3=INST` ($100k-$1M), `4=WHALE` ($\ge$ $1M). |
+| **6** | **Anomaly Detection** | Áp dụng thống kê động qua Window Function trong hàm `foreachBatch` để đánh dấu các giao dịch bất thường (Point, Contextual, Collective). |
+| **7** | **Star Schema Keys** | Ánh xạ và chuyển đổi dữ liệu thô sang các khóa thay thế: `date_key` (yyyyMMdd), `time_key` (HHmm) và `crypto_pair_key` (Surrogate Key). |
 
-### Two-Layer Deduplication Strategy
+> [!TIP]
+> **Chiến lược Khử trùng lặp 2 Lớp (Two-Layer Deduplication):**
+> 1. **Lớp 1 (Real-time in Spark):** Khử trùng lặp trạng thái (Stateful dropDuplicates) with watermark 30s xử lý các thông điệp trùng tức thời do reconnect.
+> 2. **Lớp 2 (Storage-level):** Cơ chế `INSERT ... ON CONFLICT (transaction_id) DO UPDATE` tại PostgreSQL bảo đảm tính nhất quán tuyệt đối, ngay cả khi gói tin trôi ra ngoài cửa sổ 30s của Spark.
 
-1. **Layer 1 (Real-time in Spark):** String concatenation (`crypto_symbol` + `_` + `trade_id`) + 30-second watermark window to handle immediate WebSocket reconnect replays.
-2. **Layer 2 (Storage-level):** PostgreSQL `INSERT ... ON CONFLICT (transaction_id) DO UPDATE` guarantees 100% deduplication even if duplicates arrive past the 30-second window.
+---
 
-### Dynamic Anomaly Detection Rules (foreachBatch)
+## 🧠 Thuật Toán Phát Hiện Bất Thường Thống Kê (Dynamic Anomaly Detection)
 
-Instead of static thresholds, the pipeline uses statistical Window functions per micro-batch:
+Dựa trên bộ khung phân loại của *Chandola và các cộng sự (2009)*, hệ thống sử dụng cửa sổ micro-batch tĩnh trong luồng xử lý để tính toán các tham số thống kê động của thị trường:
 
-- **Z-Score Outlier:** `z_score > 3.0` (Trade amount exceeds 3 standard deviations from the micro-batch mean for that symbol).
-- **Wash Trade Bot:** `wash_cluster_size >= 4` (High-frequency sameness: 4+ trades occurring at the exact same millisecond timestamp).
-- **Price Slippage:** `price_dev_pct > 0.01 & amount_usd > batch_mean` (Price deviates more than 1% from the batch average while having above-average volume).
+### 1. Z-Score Outlier (Điểm bất thường - Point Anomaly)
+Nhằm phát hiện các lệnh mua/bán có khối lượng USD vượt trội một cách bất thường so với hành vi chung của thị trường trong lô xử lý.
+$$Z = \frac{x - \mu}{\sigma}$$
+*Trong đó:*
+- $x$: Giá trị giao dịch đang xét ($amount\_usd$).
+- $\mu$: Trung bình cộng giá trị giao dịch của đồng coin đó trong lô ($batch\_mean\_usd$).
+- $\sigma$: Độ lệch chuẩn giá trị giao dịch ($batch\_std\_usd$).
+- **Điều kiện phát hiện:** $|Z| > 3.0$ và có ít nhất 30 giao dịch làm nền tịnh tiến ($batch\_count > 30$).
 
-### Sơ đồ luồng logic Phát hiện Bất thường (Anomaly Detection Flowchart)
+### 2. Wash Trade Bot Manipulation (Bất thường nhóm - Collective Anomaly)
+Nhận diện hành vi tạo thanh khoản ảo hoặc thao túng giá của các thuật toán Bot (HFT). Hệ thống gom nhóm giao dịch theo:
+$$\text{Wash Cluster} = \{ \text{trades} \mid \text{same Symbol, Price, Quantity, and Millisecond timestamp} \}$$
+- **Điều kiện phát hiện:** Kích thước cụm giao dịch trùng lắp $\ge 4$ và giá trị giao dịch có ý nghĩa ($\ge \$500$).
 
+### 3. Price Slippage / Market Impact (Bất thường ngữ cảnh - Contextual Anomaly)
+Phát hiện những giao dịch khớp lệnh gây trượt giá quá mạnh (lớn hơn 1% so với giá trị trung bình toàn lô) kèm theo khối lượng vượt trung bình.
+- **Điều kiện phát hiện:** Giá lệch quá 1% so với trung bình lô ($price\_dev\_pct > 0.01$) đồng thời giá trị giao dịch cao hơn trung bình ($amount\_usd > batch\_mean\_usd$).
+
+### 📊 Sơ đồ luồng logic logic Phát hiện Bất thường
 ```mermaid
 graph TD
-    %% Custom styling to make the diagram look modern and premium
     classDef startEnd fill:#F3F4F6,stroke:#1F2937,stroke-width:2px;
     classDef process fill:#FFFFFF,stroke:#374151,stroke-width:1px,rx:5px,ry:5px;
     classDef decision fill:#FFFFFF,stroke:#374151,stroke-width:1.5px;
     classDef anomalyTrue fill:#FEE2E2,stroke:#EF4444,stroke-width:1.5px,color:#991B1B,rx:5px,ry:5px;
     classDef anomalyFalse fill:#D1FAE5,stroke:#10B981,stroke-width:1.5px,color:#065F46,rx:5px,ry:5px;
 
-    %% Nodes definition
     StartNode(((Bắt đầu))):::startEnd
-    ReceiveData[Nhận Data]:::process
-    GroupData[Chia nhóm dữ liệu theo crypto_pair_key]:::process
+    ReceiveData[Nhận lô dữ liệu Micro-batch]:::process
+    GroupData[Nhóm dữ liệu theo crypto_pair_key]:::process
     
-    CalcMetrics["Tính:<br/>- batch_mean_usd<br/>- batch_std_usd<br/>- batch_avg_price<br/>- batch_count"]:::process
+    CalcMetrics["Tính toán các tham số:<br/>- batch_mean_usd<br/>- batch_std_usd<br/>- batch_avg_price<br/>- batch_count"]:::process
     
     CalcDerived["Tính: z_score, price_dev_pct, wash_cluster_size"]:::process
     
-    CheckAnomaly{"Kiểm tra Điều kiện Anomaly"}:::decision
+    CheckAnomaly{"Kiểm tra các Quy tắc?"}:::decision
     
-    Rule1["Rule 1: Khối lượng đột biến"]:::process
-    Rule2["Rule 2: Mạng lưới thao túng"]:::process
-    Rule3["Rule 3: Trượt giá"]:::process
-    
-    Cond1{"batch_count > 30<br/>AND<br/>z_score > 3.0?"}:::decision
-    Cond2{"wash_cluster_size >= 4?"}:::decision
-    Cond3{"batch_count > 30<br/>AND<br/>price_dev_pct > 0.01<br/>AND<br/>amount_usd > batch_mean?"}:::decision
-    
-    AssignTrue1[Gán]:::process
-    AssignTrue2[Gán]:::process
-    AssignTrue3[Gán]:::process
-    
-    SkipFalse1[Bỏ qua]:::process
-    SkipFalse2[Bỏ qua]:::process
-    SkipFalse3[Bỏ qua]:::process
+    Rule1{"Quy tắc 1 (Khối lượng lớn):<br/>batch_count > 30 AND<br/>|z_score| > 3.0?"}:::decision
+    Rule2{"Quy tắc 2 (Giao dịch ảo):<br/>wash_cluster_size >= 4 AND<br/>amount_usd >= 500?"}:::decision
+    Rule3{"Quy tắc 3 (Trượt giá):<br/>batch_count > 30 AND<br/>price_dev_pct > 0.01 AND<br/>amount_usd > batch_mean_usd?"}:::decision
+    Rule4{"Quy tắc Whale (Cá Voi):<br/>amount_usd >= 1,000,000?"}:::decision
     
     IsAnomalyTrue["is_anomaly = True"]:::anomalyTrue
     IsAnomalyFalse["is_anomaly = False"]:::anomalyFalse
     
-    EndNode(((End))):::startEnd
+    EndNode(((Kết thúc))):::startEnd
 
-    %% Connection lines
     StartNode --> ReceiveData
     ReceiveData --> GroupData
     GroupData --> CalcMetrics
     CalcMetrics --> CalcDerived
     CalcDerived --> CheckAnomaly
     
-    CheckAnomaly -->|Quy tắc 1| Rule1
-    CheckAnomaly -->|Quy tắc 2| Rule2
-    CheckAnomaly -->|Quy tắc 3| Rule3
+    CheckAnomaly --> Rule1
+    CheckAnomaly --> Rule2
+    CheckAnomaly --> Rule3
+    CheckAnomaly --> Rule4
     
-    Rule1 --> Cond1
-    Rule2 --> Cond2
-    Rule3 --> Cond3
+    Rule1 -->|Đúng| IsAnomalyTrue
+    Rule1 -->|Sai| IsAnomalyFalse
     
-    Cond1 -->|Đúng| AssignTrue1
-    Cond1 -->|Sai| SkipFalse1
+    Rule2 -->|Đúng| IsAnomalyTrue
+    Rule2 -->|Sai| IsAnomalyFalse
     
-    Cond2 -->|Đúng| AssignTrue2
-    Cond2 -->|Sai| SkipFalse2
-    
-    Cond3 -->|Đúng| AssignTrue3
-    Cond3 -->|Sai| SkipFalse3
-    
-    AssignTrue1 --> IsAnomalyTrue
-    AssignTrue2 --> IsAnomalyTrue
-    AssignTrue3 --> IsAnomalyTrue
-    
-    SkipFalse1 --> IsAnomalyFalse
-    SkipFalse2 --> IsAnomalyFalse
-    SkipFalse3 --> IsAnomalyFalse
+    Rule3 -->|Đúng| IsAnomalyTrue
+    Rule3 -->|Sai| IsAnomalyFalse
+
+    Rule4 -->|Đúng| IsAnomalyTrue
+    Rule4 -->|Sai| IsAnomalyFalse
     
     IsAnomalyTrue --> EndNode
     IsAnomalyFalse --> EndNode
@@ -166,9 +216,36 @@ graph TD
 
 ---
 
-## 🗄 Kimball Star Schema
+## 💬 Giám Sát Cảnh Báo Telegram (Telegram Alerting Setup)
 
-The data warehouse follows **Kimball's Dimensional Modeling** methodology with **integer surrogate keys** for all dimension tables.
+Hệ thống tích hợp giám sát và cảnh báo thời gian thực qua Telegram Bot để quản trị viên phát hiện lỗi hoặc nhà đầu tư theo dõi biến động thị trường.
+
+### 1. Cấu hình biến môi trường trong `.env`
+Đăng ký Bot với [@BotFather](https://t.me/BotFather) để lấy Token và tạo một kênh (hoặc nhóm) công khai/riêng tư để lấy Chat ID:
+```env
+# Cấu hình Token Telegram
+ALERT_TELEGRAM_TOKEN=123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ
+ALERT_TELEGRAM_CHAT_ID=-1001234567890
+```
+
+### 2. Các kịch bản kích hoạt Cảnh báo
+Hệ thống sẽ gửi tin nhắn có định dạng Markdown trong các trường hợp sau:
+
+- **🚨 Cảnh báo Hệ thống (System Failure Alerts):**
+  - **Producer Down**: Khi Live Producer mất kết nối websocket tới Binance hoặc không thể kết nối tới Kafka Broker.
+  - **BigQuery DLQ Alert**: Khi Spark gặp sự cố mạng không tải được dữ liệu lên Google Cloud BigQuery, tệp dữ liệu lưu vào thư mục DLQ cục bộ.
+- **🔔 Cảnh báo Thị trường (Market Anomaly Alerts):**
+  - **Whale Alerts**: Xuất hiện giao dịch giá trị cực lớn ($\ge \$1,000,000$).
+  - **Wash Trade Alerts**: Phát hiện bot thao túng giao dịch liên tục cùng mili-giây.
+  - **Price Slippage Alerts**: Trượt giá mạnh kèm khối lượng đột biến.
+
+*(Để tránh bị Telegram khóa chat do gửi quá nhiều tin nhắn - Rate Limit, các giao dịch bất thường sẽ được gom nhóm và gửi tóm tắt một lần duy nhất tại mỗi micro-batch).*
+
+---
+
+## 🗄️ Thiết Kế Kho Dữ Liệu (Kimball Star Schema)
+
+Nhằm tối ưu hóa hiệu năng lưu trữ và truy vấn JOIN phục vụ phân tích Dashboards, kho dữ liệu được tổ chức theo cấu trúc Star Schema với **Surrogate Keys** kiểu số nguyên thông minh.
 
 ```mermaid
 erDiagram
@@ -181,12 +258,12 @@ erDiagram
         VARCHAR time_of_day
     }
     dim_crypto_pair {
-        INT crypto_pair_key PK "Surrogate Key 1-5"
-        VARCHAR crypto_symbol "Natural Key"
+        INT crypto_pair_key PK "Surrogate Key (1-5)"
+        VARCHAR crypto_symbol "Natural Key (BTCUSDT...)"
     }
     dim_volume_category {
-        INT volume_category_key PK "Surrogate Key 1-4"
-        VARCHAR volume_category "Natural Key"
+        INT volume_category_key PK "Surrogate Key (1-4)"
+        VARCHAR volume_category "Natural Key (RETAIL...)"
     }
     fact_binance_trades {
         VARCHAR transaction_id PK "Degenerate Dimension"
@@ -212,61 +289,80 @@ erDiagram
 
 ---
 
-## 🔄 Dual-Sink Storage with Fault Tolerance
+## 🔄 Cơ Chế Dual-Sink & Kháng Lỗi (Fault Tolerance)
 
-| Feature | PostgreSQL (Primary) | BigQuery (Backup) |
-|---------|---------------------|-------------------|
-| Mode | Synchronous | Asynchronous (buffered) |
-| Write Method | UPSERT via psycopg2 execute_values | Parquet Load Job via google-cloud-bigquery |
-| Dedup | ON CONFLICT (transaction_id) DO UPDATE | WRITE_APPEND (periodic dedup if needed) |
-| Failure Handling | Transaction rollback | DLQ (Dead-Letter Queue): failed Parquet files moved to dlq_bq_failed/ for manual retry |
-| Buffer Strategy | Immediate per micro-batch | Flush every 10 seconds OR 5,000 rows |
-| Latency Tracking | Logs to fact_pipeline_latency | Included in DLQ system |
+Hệ thống lưu trữ song song (Dual-Sink) nhằm giải quyết cả hai bài toán: Truy vấn nhanh/cảnh báo nóng và Lưu trữ phân tích lịch sử dung lượng lớn.
+
+| Đặc tính kỹ thuật | PostgreSQL (Primary Sink) | Google BigQuery (Backup Sink) |
+|-------------------|---------------------------|-------------------------------|
+| **Chế độ xử lý** | Đồng bộ trực tiếp (Synchronous) | Bất đồng bộ (Asynchronous via Buffering) |
+| **Phương thức ghi** | UPSERT qua thư viện `psycopg2 execute_values` | Tải tệp (Parquet Load Job) qua `google-cloud-bigquery` |
+| **Kỹ thuật đệm** | Ghi ngay sau mỗi chu kỳ micro-batch của Spark | Ghi khi đệm đạt 5,000 dòng hoặc đủ 60 giây |
+| **Khử trùng lặp** | `ON CONFLICT (transaction_id) DO UPDATE` | `WRITE_APPEND` (Khử trùng khi đồng bộ ngoại tuyến) |
+| **Cơ chế kháng lỗi** | Tự động Rollback Transaction khi lỗi lô | Chuyển file Parquet lỗi vào thư mục DLQ cục bộ |
+| **Khôi phục lỗi** | Dựa trên checkpoint của Spark | Sử dụng script tự chữa lành `scripts/retry_dlq_to_bq.py` |
 
 ---
 
-## 🚀 How to Run
+## 🚀 Hướng Dẫn Chạy Hệ Thống (Quick Start)
 
-### Prerequisites
-
+### 📋 Yêu cầu hệ thống
 - Python 3.10+
-- Docker Desktop running (for PostgreSQL, Kafka, Zookeeper)
-- Google Cloud service account JSON for BigQuery (Optional)
+- Docker Desktop đang chạy.
+- Khóa dịch vụ Google Cloud Service Account JSON cho BigQuery (nếu ghi vào BigQuery).
 
-### Quick Start
+### 🛠️ Các bước thực thi nhanh (Sử dụng Makefile)
 
 ```powershell
-# 1. Install dependencies
+# 1. Cài đặt các thư viện Python phụ thuộc
 make install
 
-# 2. Start infrastructure (Kafka + Zookeeper + PostgreSQL)
+# 2. Khởi chạy cơ sở hạ tầng ảo (Kafka + Zookeeper) qua Docker
 make start-kafka
 
-# 3. Create Star Schema tables
-make setup-pg       # PostgreSQL
-make setup-bq       # BigQuery (optional)
+# 3. Tạo cấu trúc bảng Star Schema trong PostgreSQL DW
+make setup-pg
 
-# 4. Seed dimension tables
-make seed-pg        # PostgreSQL
-make seed-bq        # BigQuery (optional)
+# 4. Nạp dữ liệu danh mục tĩnh cho PostgreSQL
+make seed-pg
 
-# 5. Run pipeline (open 2 terminals)
-make run-live       # Terminal 1: Binance WebSocket → Kafka
-make run-spark      # Terminal 2: Spark Processing → Dual Sink
+# 5. Khởi chạy bộ thu thập dữ liệu (Binance WebSocket -> Kafka)
+# (Mở Terminal 1)
+make run-live
+
+# 6. Khởi chạy bộ xử lý Spark (Kafka -> Transform -> PostgreSQL/BigQuery)
+# (Mở Terminal 2)
+make run-spark
+```
+
+### 🔍 Lệnh xác minh và Kiểm tra (Verification Commands)
+```powershell
+# Xem nhanh dữ liệu giao dịch trong PostgreSQL DW
+make check-db
+
+# Đồng bộ thủ công dữ liệu từ Postgres sang BigQuery
+make upload-bq
+
+# Quét DLQ và tải bù dữ liệu lên BigQuery (Self-Healing)
+python scripts/retry_dlq_to_bq.py
+
+# Giả lập bơm giao dịch bất thường để kiểm tra cảnh báo Telegram
+python scripts/inject_anomalies.py
 ```
 
 ---
 
-## 🛠 Tech Stack
+## 🛠️ Công Nghệ Sử Dụng
 
-| Technology | Version | Purpose |
-|------------|---------|---------|
-| Python | 3.10+ | Core language |
-| Apache Kafka | Confluent 7.5.0 | Message broker |
-| Apache Spark | 3.5.0 | Stream processing engine |
-| PostgreSQL | 15 | Primary data warehouse |
-| Google BigQuery| — | Backup data warehouse |
-| Power BI | — | Visualization layer |
-| Docker | — | Container orchestration |
+| Công nghệ | Phiên bản | Vai trò trong hệ thống |
+|------------|---------|-------------------------|
+| **Python** | 3.10+ | Ngôn ngữ phát triển cốt lõi |
+| **Apache Kafka** | Confluent 7.5.0 | Hệ thống hàng đợi thông điệp, phân phối luồng |
+| **Apache Spark** | 3.5.0 | Bộ xử lý luồng cấu trúc thời gian thực (Structured Streaming) |
+| **PostgreSQL** | 15.x | Kho dữ liệu quan hệ lưu trữ nóng (Primary DW) |
+| **Google BigQuery**| — | Kho dữ liệu đám mây sao lưu lưu trữ lạnh (Backup DW) |
+| **Power BI** | — | Trực quan hóa dữ liệu và xây dựng Dashboard báo cáo |
+| **Docker** | — | Đóng gói và ảo hóa hạ tầng hệ thống |
 
-*This project is part of a graduation thesis — Real-time Crypto Data Pipeline with Kimball Star Schema.*
+---
+*Dự án thuộc đề tài khóa luận tốt nghiệp của tác giả - Hệ thống Pipeline phân tích dữ liệu Crypto thời gian thực dựa trên mô hình Star Schema.*

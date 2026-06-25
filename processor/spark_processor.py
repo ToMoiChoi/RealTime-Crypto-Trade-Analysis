@@ -24,6 +24,8 @@ import time
 import shutil
 import logging
 import threading
+import json
+import urllib.request
 from datetime import datetime
 
 import psycopg2
@@ -55,6 +57,10 @@ load_dotenv(ENV_PATH)
 KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
 KAFKA_TOPIC             = os.getenv("KAFKA_TOPIC", "payment_events_v3")
 
+# Telegram Configuration
+TELEGRAM_TOKEN = os.getenv("ALERT_TELEGRAM_TOKEN", "")
+TELEGRAM_CHAT_ID = os.getenv("ALERT_TELEGRAM_CHAT_ID", "")
+
 # PostgreSQL (Primary Sink)
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
@@ -78,6 +84,34 @@ BQ_PARQUET_DIR = os.getenv("BQ_PARQUET_BACKUP_DIR", "/tmp/bq_backup")
 BQ_DLQ_DIR = os.getenv("BQ_DLQ_DIR", os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dlq_bq_failed"
 ))
+
+
+def send_telegram_alert(message: str):
+    """Gửi cảnh báo đến Telegram bất đồng bộ (Asynchronous Thread) để tránh làm nghẽn luồng xử lý Spark."""
+    if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+
+    def _send():
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {
+                "chat_id": TELEGRAM_CHAT_ID,
+                "text": message,
+                "parse_mode": "Markdown"
+            }
+            data = json.dumps(payload).encode("utf-8")
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                response.read()
+        except Exception as e:
+            logger.warning(f"[TELEGRAM] Failed to send Telegram alert: {e}")
+
+    threading.Thread(target=_send, daemon=True).start()
+
 
 
 # =====================================================================
@@ -117,9 +151,10 @@ def create_spark_session() -> SparkSession:
             "org.apache.spark:spark-sql-kafka-0-10_2.12:3.5.0,"
             "org.postgresql:postgresql:42.7.3"
         )
-        .config("spark.sql.shuffle.partitions", "2")
-        .config("spark.driver.memory", "2g")
-        .config("spark.executor.memory", "2g")
+        .config("spark.sql.shuffle.partitions", "1")
+        .config("spark.sql.streaming.minBatchesToRetain", "10")
+        .config("spark.driver.memory", "4g")
+        .config("spark.executor.memory", "4g")
         .config("spark.memory.fraction", "0.6")
         .config("spark.sql.execution.arrow.pyspark.enabled", "true")
         # --- Latency optimization configs ---
@@ -504,6 +539,15 @@ def _bq_async_upload(rows_dicts: list, batch_id: int, row_count: int):
         logger.error(
             f"[BQ DLQ] Batch {batch_id} FAILED to upload to BigQuery: {e}"
         )
+        # Send Telegram alert for BigQuery failure
+        err_msg = (
+            f"❌ *[BigQuery Storage Error]*\n"
+            f"Batch: `{batch_id}`\n"
+            f"Dòng ảnh hưởng: `{row_count:,}`\n"
+            f"Lỗi: `{str(e)[:250]}`\n"
+            f"Trạng thái: Đã chuyển tệp dữ liệu vào thư mục cách ly (DLQ) để tự phục hồi."
+        )
+        send_telegram_alert(err_msg)
         if pq_path and os.path.exists(pq_path):
             os.makedirs(BQ_DLQ_DIR, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -566,8 +610,8 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
             .withColumn("wash_cluster_size", count("trade_id").over(w_wash))
             .withColumn("is_anomaly", when(
                 # --- NHÓM 1: POINT ANOMALIES (Bất thường điểm đơn lẻ) ---
-                (col("amount_usd") >= 1000000) |                                                   # Whale Alert (> 1M USD)
-                ((col("batch_count") > 30) & (col("z_score") > 3.0)) |                             # Z-Score Outlier (3-Sigma)
+                (col("amount_usd") >= 1000000) |                                                    # Whale Alert (> 1M USD)
+                ((col("batch_count") > 30) & (spark_abs(col("z_score")) > 3.0)) |                   # Z-Score Outlier (3-Sigma)
                 # --- NHÓM 2: COLLECTIVE ANOMALIES (Bất thường nhóm/tập hợp) ---
                 ((col("batch_count") > 30) & (col("wash_cluster_size") >= 4) & (col("amount_usd") >= 500.0)) | # Bot Wash Trade (Hành vi tần suất cao với volume đáng kể)                
                 # --- NHÓM 3: CONTEXTUAL ANOMALIES (Bất thường ngữ cảnh trượt giá) ---
@@ -583,6 +627,48 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
         anomaly_count = sum(1 for r in rows if r.is_anomaly)
         anomaly_rate = (anomaly_count / total_rows * 100) if total_rows > 0 else 0.0
         logger.info(f"[Batch {batch_id}] Dynamic anomaly detection applied | Total rows: {total_rows} | Anomaly rate: {anomaly_rate:.2f}% ({anomaly_count} anomalies)")
+
+        # --- SEND TELEGRAM ALERTS FOR MARKET ANOMALIES ---
+        if anomaly_count > 0:
+            SYMBOL_MAP = {1: "BTCUSDT", 2: "ETHUSDT", 3: "BNBUSDT", 4: "SOLUSDT", 5: "XRPUSDT"}
+            
+            whale_alerts = []
+            wash_trades = []
+            slippages = []
+            zscore_alerts = []
+            
+            for r in rows:
+                if r.is_anomaly:
+                    sym = SYMBOL_MAP.get(r.crypto_pair_key, "UNKNOWN")
+                    amt = float(r.amount_usd)
+                    price_val = float(r.price)
+                    qty_val = float(r.quantity)
+                    z_score_val = float(r.z_score) if r.z_score is not None else 0.0
+                    slippage_val = float(r.price_dev_pct) if r.price_dev_pct is not None else 0.0
+                    wash_size = int(r.wash_cluster_size) if r.wash_cluster_size is not None else 0
+                    
+                    if amt >= 1000000.0:
+                        whale_alerts.append(f"• *{sym}*: `${amt:,.2f}` (Giá: `${price_val:,.4f}`, Qty: `{qty_val:,.4f}`)")
+                    elif wash_size >= 4 and amt >= 500.0:
+                        wash_trades.append(f"• *{sym}*: `{wash_size}` lệnh cùng mili-giây (Tổng Vol: `${amt:,.2f}`)")
+                    elif slippage_val > 0.01:
+                        slippages.append(f"• *{sym}*: Trượt giá `{slippage_val*100:.2f}%` | Vol: `${amt:,.2f}` | Giá: `${price_val:,.4f}`")
+                    elif abs(z_score_val) > 3.0:
+                        zscore_alerts.append(f"• *{sym}*: Z-Score `{z_score_val:.2f}` | Vol: `${amt:,.2f}`")
+            
+            alert_sections = []
+            if whale_alerts:
+                alert_sections.append("🐳 *[Whale Alerts (Giao dịch Cá Voi)]*\n" + "\n".join(whale_alerts))
+            if wash_trades:
+                alert_sections.append("🤖 *[Wash Trade (Thao túng Bot)]*\n" + "\n".join(wash_trades))
+            if slippages:
+                alert_sections.append("📉 *[Price Slippage (Trượt giá mạnh)]*\n" + "\n".join(slippages))
+            if zscore_alerts:
+                alert_sections.append("📈 *[Volume Outliers (Z-Score > 3)]*\n" + "\n".join(zscore_alerts[:5]) + (f"\n...và {len(zscore_alerts)-5} lệnh khác" if len(zscore_alerts) > 5 else ""))
+                
+            if alert_sections:
+                tg_msg = f"🔔 *[BATCH {batch_id}] PHÁT HIỆN BẤT THƯỜNG THỊ TRƯỜNG* 🔔\n\n" + "\n\n".join(alert_sections)
+                send_telegram_alert(tg_msg)
     except Exception as e:
         logger.error(f"[Batch {batch_id}] [ERROR] Dynamic anomaly detection failed, falling back: {e}")
         fallback_df = (
@@ -605,32 +691,33 @@ def dual_sink_batch(batch_df: DataFrame, batch_id: int):
         logger.error(f"[Batch {batch_id}] [ERROR] PostgreSQL sink failed: {e}")
 
     # --- Sink 2: BigQuery (async buffered with DLQ) ---
-    try:
-        bq_data = [r.asDict() for r in rows]
+    if BQ_PROJECT_ID:
+        try:
+            bq_data = [r.asDict() for r in rows]
 
-        with BQ_BUFFER_LOCK:
-            BQ_BUFFER.extend(bq_data)
-            current_buffer_size = len(BQ_BUFFER)
-            time_since_last_upload = time.time() - LAST_BQ_UPLOAD_TIME
-
-        if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT or time_since_last_upload >= BQ_UPLOAD_INTERVAL_SEC:
             with BQ_BUFFER_LOCK:
-                upload_data = BQ_BUFFER.copy()
-                BQ_BUFFER.clear()
-                LAST_BQ_UPLOAD_TIME = time.time()
+                BQ_BUFFER.extend(bq_data)
+                current_buffer_size = len(BQ_BUFFER)
+                time_since_last_upload = time.time() - LAST_BQ_UPLOAD_TIME
 
-            if len(upload_data) > 0:
-                logger.info(
-                    f"[BQ Buffer Flush] Collected {len(upload_data):,} rows "
-                    f"in {int(time_since_last_upload)}s. Uploading..."
-                )
-                threading.Thread(
-                    target=_bq_async_upload,
-                    args=(upload_data, batch_id, len(upload_data)),
-                    daemon=True
-                ).start()
-    except Exception as e:
-        logger.warning(f"[Batch {batch_id}] [WARN] BQ buffer failed: {e}")
+            if current_buffer_size >= BQ_UPLOAD_ROWS_LIMIT or time_since_last_upload >= BQ_UPLOAD_INTERVAL_SEC:
+                with BQ_BUFFER_LOCK:
+                    upload_data = BQ_BUFFER.copy()
+                    BQ_BUFFER.clear()
+                    LAST_BQ_UPLOAD_TIME = time.time()
+
+                if len(upload_data) > 0:
+                    logger.info(
+                        f"[BQ Buffer Flush] Collected {len(upload_data):,} rows "
+                        f"in {int(time_since_last_upload)}s. Uploading..."
+                    )
+                    threading.Thread(
+                        target=_bq_async_upload,
+                        args=(upload_data, batch_id, len(upload_data)),
+                        daemon=True
+                    ).start()
+        except Exception as e:
+            logger.warning(f"[Batch {batch_id}] [WARN] BQ buffer failed: {e}")
 
     latency_ms = int((time.time() - t_start) * 1000)
     logger.info(f"[Batch {batch_id}] rows={row_count:,} | latency={latency_ms}ms | PG done, BQ async")
@@ -676,7 +763,7 @@ def main():
         .option("failOnDataLoss", "false")
         .option("maxOffsetsPerTrigger", "2000")
         .load()
-    )
+    )   
 
     # Parse raw JSON from Kafka value
     parsed_df = (
