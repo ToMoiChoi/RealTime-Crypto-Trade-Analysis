@@ -78,7 +78,7 @@ def main():
     # 2. Get BigQuery configs
     BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
     BQ_DATASET    = os.getenv("BQ_DATASET", "binance_dw")
-    BQ_TABLE_FACT = "fact_binance_trades"
+    BQ_TABLE_FACT = "fact_binance_trades"  
     GOOGLE_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
     # Get Alerting configs

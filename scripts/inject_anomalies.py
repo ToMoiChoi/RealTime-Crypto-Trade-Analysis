@@ -84,11 +84,11 @@ def main():
     if choice == "2" or choice == "5":
         print("\n--> [2] Đang bơm cụm Wash Trade (5 giao dịch BTC cùng 1 giây)...")
         now_ms = int(time.time() * 1000)
-        # 5 trades at the exact same millisecond
+        # 5 trades at the exact same millisecond with the exact same price and quantity
+        q_wash = round(random.uniform(0.15, 0.5), 2)
         for i in range(5):
             p = btc_base
-            q = round(random.uniform(0.1, 0.5), 2)
-            payload = send_trade(producer, "BTCUSDT", p, q, time_ms=now_ms)
+            payload = send_trade(producer, "BTCUSDT", p, q_wash, time_ms=now_ms)
             print(f"    Sent TradeID: {payload['trade_id']} | Price: {payload['price']} | Qty: {payload['quantity']} | TimeMS: {payload['trade_time_ms']}")
         producer.flush()
         print("    [OK] Đã gửi wash trade cluster.")
