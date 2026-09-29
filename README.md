@@ -130,25 +130,25 @@ graph TD
     PowerBI["📊 Power BI Reporting<br/>(5 Specialized Analytic Dashboards)"]:::bi
 
     %% Connections
-    BinanceWS -->|Raw JSON Stream| Producer
-    Producer -->|LZ4 Encoded Bytes| Kafka
-    Kafka -->|Micro-batch Stream| Clean
+    BinanceWS -->|"Raw JSON Stream"| Producer
+    Producer -->|"LZ4 Encoded Bytes"| Kafka
+    Kafka -->|"Micro-batch Stream"| Clean
     Clean --> Dedup --> Derive --> Anomaly --> SKGen
     SKGen <--> Checkpoint
 
-    SKGen -->|1. Đồng bộ (Sync UPSERT)| Postgres
-    SKGen -->|2. Đệm bất đồng bộ (Async Parquet)| BQ
-    BQ -.->|Sự cố mạng / Quota API| DLQ
-    DLQ -.->|Self-Healing Script Retry| BQ
+    SKGen -->|"1. Đồng bộ - Sync UPSERT"| Postgres
+    SKGen -->|"2. Đệm bất đồng bộ - Async Parquet"| BQ
+    BQ -.->|"Sự cố mạng hoặc Quota API"| DLQ
+    DLQ -.->|"Self-Healing Script Retry"| BQ
 
     %% Alert links
-    Producer -.->|Mất kết nối / Reconnect fail| Telegram
-    Anomaly -.->|Phát hiện Whale / Wash Trade / Slippage| Telegram
-    Storage -.->|BigQuery Down -> Lưu DLQ| Telegram
+    Producer -.->|"Mất kết nối hoặc Reconnect fail"| Telegram
+    Anomaly -.->|"Phát hiện Whale, Wash Trade, Slippage"| Telegram
+    Storage -.->|"BigQuery Down: Lưu vào DLQ"| Telegram
 
     %% BI link
-    BQ -->|DirectQuery / Import| PowerBI
-    Postgres -.->|Hot Real-time Query| PowerBI
+    BQ -->|"DirectQuery hoặc Import"| PowerBI
+    Postgres -.->|"Hot Real-time Query"| PowerBI
 ```
 
 ### 3.2. Luồng dữ liệu xử lý End-to-End
@@ -248,29 +248,29 @@ $$\text{Price Deviation Pct} = \frac{|Price - \bar{P}_{batch}|}{\bar{P}_{batch}}
 #### 📊 Sơ đồ logic kiểm tra bất thường trong Spark micro-batch:
 ```mermaid
 flowchart TD
-    Start([Bắt đầu kiểm tra lô micro-batch]) --> Group[Nhóm dữ liệu theo crypto_pair_key]
-    Group --> Calc[Tính toán tham số thống kê:<br/>batch_mean_usd, batch_std_usd, batch_avg_price, batch_count]
-    Calc --> Eval[Tính toán z_score, price_dev_pct, wash_cluster_size]
+    Start(["Bắt đầu kiểm tra lô micro-batch"]) --> Group["Nhóm dữ liệu theo crypto_pair_key"]
+    Group --> Calc["Tính toán tham số thống kê:<br/>batch_mean_usd, batch_std_usd, batch_avg_price, batch_count"]
+    Calc --> Eval["Tính toán z_score, price_dev_pct, wash_cluster_size"]
     
-    Eval --> R1{Quy tắc Whale:<br/>amount_usd >= 1,000,000?}
-    Eval --> R2{Quy tắc Z-Score:<br/>batch_count > 30 AND<br/>|z_score| > 3.0?}
-    Eval --> R3{Quy tắc Wash Trade:<br/>wash_cluster_size >= 4 AND<br/>amount_usd >= 500?}
-    Eval --> R4{Quy tắc Slippage:<br/>batch_count > 30 AND<br/>price_dev_pct > 0.01 AND<br/>amount_usd > batch_mean_usd?}
+    Eval --> R1{"Quy tắc Whale:<br/>amount_usd >= 1,000,000?"}
+    Eval --> R2{"Quy tắc Z-Score:<br/>batch_count > 30 AND<br/>abs(z_score) > 3.0?"}
+    Eval --> R3{"Quy tắc Wash Trade:<br/>wash_cluster_size >= 4 AND<br/>amount_usd >= 500?"}
+    Eval --> R4{"Quy tắc Slippage:<br/>batch_count > 30 AND<br/>price_dev_pct > 0.01 AND<br/>amount_usd > batch_mean_usd?"}
 
-    R1 -- Đúng --> FlagTrue[Gán is_anomaly = True]
-    R2 -- Đúng --> FlagTrue
-    R3 -- Đúng --> FlagTrue
-    R4 -- Đúng --> FlagTrue
+    R1 -- "Đúng" --> FlagTrue["Gán is_anomaly = True"]
+    R2 -- "Đúng" --> FlagTrue
+    R3 -- "Đúng" --> FlagTrue
+    R4 -- "Đúng" --> FlagTrue
 
-    R1 -- Sai --> CheckAll{Không vi phạm<br/>quy tắc nào?}
-    R2 -- Sai --> CheckAll
-    R3 -- Sai --> CheckAll
-    R4 -- Sai --> CheckAll
+    R1 -- "Sai" --> CheckAll{"Không vi phạm<br/>quy tắc nào?"}
+    R2 -- "Sai" --> CheckAll
+    R3 -- "Sai" --> CheckAll
+    R4 -- "Sai" --> CheckAll
 
-    CheckAll -- Đúng --> FlagFalse[Gán is_anomaly = False]
+    CheckAll -- "Đúng" --> FlagFalse["Gán is_anomaly = False"]
     
-    FlagTrue --> PushAlert[Đẩy tin nhắn tổng hợp sang Telegram Alerting Thread]
-    FlagFalse --> SinkDW[Chuyển tiếp đến hàm lưu trữ Dual-Sink]
+    FlagTrue --> PushAlert["Đẩy tin nhắn tổng hợp sang Telegram Alerting Thread"]
+    FlagFalse --> SinkDW["Chuyển tiếp đến hàm lưu trữ Dual-Sink"]
     PushAlert --> SinkDW
 ```
 
