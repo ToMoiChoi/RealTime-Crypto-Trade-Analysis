@@ -14,10 +14,14 @@ if hasattr(sys.stdout, 'reconfigure'):
 load_dotenv(".env")
 
 # Cấu hình BQ
-BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID", "ecommerce-db2025")
+BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
 if GOOGLE_APPLICATION_CREDENTIALS:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = os.path.abspath(GOOGLE_APPLICATION_CREDENTIALS)
+
+if not BQ_PROJECT_ID:
+    print("[ERROR] BQ_PROJECT_ID chua duoc cau hinh trong file .env.")
+    sys.exit(1)
 
 # Cấu hình PG
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")

@@ -9,8 +9,12 @@ if hasattr(sys.stdout, 'reconfigure'):
 
 # 1. Tải cấu hình từ file .env
 load_dotenv(".env")
-BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID", "ecommerce-db2025")
+BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
 GOOGLE_APPLICATION_CREDENTIALS = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
+if not BQ_PROJECT_ID:
+    print("[ERROR] BQ_PROJECT_ID chua duoc cau hinh trong file .env.")
+    sys.exit(1)
 
 # Set biến môi trường cho Google Auth
 if GOOGLE_APPLICATION_CREDENTIALS:
@@ -21,7 +25,7 @@ try:
 except Exception as e:
     print(f"Lỗi khởi tạo BigQuery Client: {e}")
     print("Vui lòng kiểm tra lại file JSON chứa key service account.")
-    exit(1)
+    sys.exit(1)
 
 # 2. Cấu hình bảng nguồn và bảng đích
 source_table = f"{BQ_PROJECT_ID}.binance_dw.fact_binance_trades_v02"

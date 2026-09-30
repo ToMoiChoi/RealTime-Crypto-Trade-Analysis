@@ -1,4 +1,3 @@
-
 # ============================================================
 # Makefile - Binance Crypto Streaming Pipeline
 # ============================================================
@@ -11,8 +10,9 @@
 #   -> make check-db (verify)
 # ============================================================
 
-.PHONY: help install setup-bq seed-bq seed-pg start-kafka stop-kafka \
-        run-live run-spark run-spark-docker reconcile clean logs
+.PHONY: help install setup-bq seed-bq setup-pg seed-pg start-kafka stop-kafka \
+        run-live run-spark run-spark-docker reconcile check-db upload-bq \
+        evaluate sensitivity inject-anomaly retry-dlq reset-spark clean logs
 
 # -- Colors --------------------------------------------------------
 GREEN  := \033[0;32m
@@ -24,35 +24,40 @@ RESET  := \033[0m
 help:
 	@echo ""
 	@echo "$(CYAN)+======================================================+$(RESET)"
-	@echo "$(CYAN)|    Binance Crypto Streaming Pipeline                  |$(RESET)"
+	@echo "$(CYAN)|    Binance Crypto Streaming Pipeline                 |$(RESET)"
 	@echo "$(CYAN)+======================================================+$(RESET)"
 	@echo ""
-	@echo "$(YELLOW)Setup$(RESET)"
-	@echo "  make install        Install Python dependencies"
-	@echo "  make setup-bq       Create BigQuery dataset and tables"
-	@echo "  make seed-bq        Seed dimension tables to BigQuery (no PG)"
-	@echo "  make setup-pg       Create PostgreSQL Star Schema"
-	@echo "  make seed-pg        Seed dimension tables to PostgreSQL"
+	@echo "$(YELLOW)Setup & Dependencies$(RESET)"
+	@echo "  make install         Install Python dependencies"
+	@echo "  make setup-pg        Create PostgreSQL Star Schema"
+	@echo "  make seed-pg         Seed dimension tables to PostgreSQL"
+	@echo "  make setup-bq        Create BigQuery dataset and tables"
+	@echo "  make seed-bq         Seed dimension tables directly to BigQuery"
 	@echo ""
 	@echo "$(YELLOW)Infrastructure$(RESET)"
-	@echo "  make start-kafka    docker-compose up (Kafka + Zookeeper)"
-	@echo "  make stop-kafka     docker-compose down"
-	@echo "  make logs           Tail Kafka logs"
+	@echo "  make start-kafka     docker-compose up (Kafka + Zookeeper + Postgres)"
+	@echo "  make stop-kafka      docker-compose down"
+	@echo "  make logs            Tail Kafka logs"
 	@echo ""
-	@echo "$(YELLOW)Pipeline$(RESET)"
-	@echo "  make run-live       Run live producer (Binance WebSocket)"
-	@echo "  make run-spark      Run Spark locally (dual sink)"
-	@echo "  make run-spark-docker  Run Spark in Docker container"
+	@echo "$(YELLOW)Pipeline Execution$(RESET)"
+	@echo "  make run-live        Run live producer (Binance WebSocket -> Kafka)"
+	@echo "  make run-spark       Run Spark Structured Streaming locally (dual sink)"
+	@echo "  make run-spark-docker Run Spark in Docker container"
 	@echo ""
-	@echo "$(YELLOW)Verification$(RESET)"
-	@echo "  make reconcile      Compare Kafka msgs vs BigQuery rows"
-	@echo "  make check-db       Query data from Postgres DW"
+	@echo "$(YELLOW)Testing & Benchmarking$(RESET)"
+	@echo "  make inject-anomaly  Interactive synthetic anomaly injector (Kafka)"
+	@echo "  make evaluate        Benchmark anomaly detection metrics (Precision/Recall)"
+	@echo "  make sensitivity     Run threshold sensitivity analysis (Z-Score & Wash)"
+	@echo "  make retry-dlq       Scan and retry failed BigQuery DLQ Parquet files"
 	@echo ""
-	@echo "$(YELLOW)Sync$(RESET)"
-	@echo "  make upload-bq      Sync Postgres data to BigQuery"
+	@echo "$(YELLOW)Verification & Sync$(RESET)"
+	@echo "  make check-db        Query live overview from Postgres DW"
+	@echo "  make reconcile       Compare Kafka produced msgs vs BigQuery rows"
+	@echo "  make upload-bq       Sync Postgres data offline to BigQuery"
 	@echo ""
-	@echo "$(YELLOW)Cleanup$(RESET)"
-	@echo "  make clean          Remove __pycache__ and checkpoint dirs"
+	@echo "$(YELLOW)Maintenance & Reset$(RESET)"
+	@echo "  make reset-spark     Hard reset Spark checkpoints and truncate DW fact"
+	@echo "  make clean           Remove __pycache__ and temporary buffers"
 	@echo ""
 
 # -- Install dependencies ------------------------------------------
@@ -82,11 +87,11 @@ seed-pg:
 
 # -- Kafka infra -----------------------------------------------------
 start-kafka:
-	@echo "$(GREEN)Starting Kafka + Zookeeper...$(RESET)"
-	docker-compose up -d zookeeper kafka
-	@echo "$(YELLOW)Waiting 10s for Kafka to be ready...$(RESET)"
+	@echo "$(GREEN)Starting Kafka + Zookeeper + Postgres...$(RESET)"
+	docker-compose up -d zookeeper kafka postgres
+	@echo "$(YELLOW)Waiting 10s for services to be ready...$(RESET)"
 	python -c "import time; time.sleep(10)"
-	@echo "$(GREEN)Kafka is up.$(RESET)"
+	@echo "$(GREEN)Infrastructure is up.$(RESET)"
 
 stop-kafka:
 	@echo "$(YELLOW)Stopping all containers...$(RESET)"
@@ -110,25 +115,44 @@ run-spark-docker:
 	@echo "$(GREEN)Building and running Spark in Docker...$(RESET)"
 	docker-compose up --build spark-processor
 
-# -- Reconciliation ---------------------------------------------------
+# -- Testing & Benchmarking -------------------------------------------
+inject-anomaly:
+	@echo "$(GREEN)Running interactive anomaly injection tool...$(RESET)"
+	python scripts/inject_anomalies.py
+
+evaluate:
+	@echo "$(GREEN)Running anomaly detection evaluation benchmark...$(RESET)"
+	python scripts/evaluate_anomalies.py
+
+sensitivity:
+	@echo "$(GREEN)Running anomaly threshold sensitivity analysis...$(RESET)"
+	python scripts/sensitivity_analysis.py
+
+retry-dlq:
+	@echo "$(GREEN)Running DLQ self-healing retry script for BigQuery...$(RESET)"
+	python scripts/retry_dlq_to_bq.py
+
+# -- Verification -----------------------------------------------------
 reconcile:
 	@echo "$(GREEN)Running reconciliation check...$(RESET)"
 	python -m warehouse.bq_reconcile
 
-# -- Check Postgres Data -----------------------------------------------
 check-db:
 	@echo "$(GREEN)Querying Postgres Data Warehouse...$(RESET)"
 	python scripts/check_pg_data.py
 
-# -- Upload to BigQuery ------------------------------------------------
 upload-bq:
 	@echo "$(GREEN)Syncing Postgres data to BigQuery...$(RESET)"
 	python scripts/pg_to_bq_sync.py
 
-# -- Cleanup -----------------------------------------------------------
+# -- Maintenance & Reset ----------------------------------------------
+reset-spark:
+	@echo "$(YELLOW)Hard resetting Spark checkpoints and Postgres fact...$(RESET)"
+	python scripts/hard_reset_spark.py
+
 clean:
-	@echo "$(YELLOW)Cleaning up...$(RESET)"
+	@echo "$(YELLOW)Cleaning up temporary files...$(RESET)"
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
-	rm -rf /tmp/spark_checkpoint_dual_sink 2>/dev/null || true
+	rm -rf /tmp/spark_checkpoint* 2>/dev/null || true
 	rm -rf /tmp/bq_backup 2>/dev/null || true
 	@echo "$(GREEN)Done.$(RESET)"

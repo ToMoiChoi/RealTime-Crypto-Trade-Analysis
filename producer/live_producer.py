@@ -71,8 +71,10 @@ def send_telegram_alert(message: str):
             )
             with urllib.request.urlopen(req, timeout=5) as response:
                 response.read()
+        except urllib.error.HTTPError as he:
+            print(f"   [WARN] Failed to send Telegram alert: HTTP {he.code} ({he.reason})")
         except Exception as e:
-            print(f"   [WARN] Failed to send Telegram alert: {e}")
+            print(f"   [WARN] Failed to send Telegram alert: {type(e).__name__} - {str(e)[:100]}")
 
     threading.Thread(target=_send, daemon=True).start()
 

@@ -7,6 +7,15 @@ Run this script to remove stale checkpoints and truncate fact tables.
 import os
 import shutil
 import psycopg2
+from dotenv import load_dotenv
+
+load_dotenv()
+
+PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
+PG_PORT     = os.getenv("POSTGRES_PORT", "5432")
+PG_DB       = os.getenv("POSTGRES_DB", "binance_dw")
+PG_USER     = os.getenv("POSTGRES_USER", "binance")
+PG_PASSWORD = os.getenv("POSTGRES_PASSWORD", "binance123")
 
 print("1. Removing Spark Checkpoint...")
 for base in [r"C:\tmp", r"\tmp"]:
@@ -21,7 +30,13 @@ for base in [r"C:\tmp", r"\tmp"]:
 
 print("2. Cleaning up PostgreSQL staging and fact tables...")
 try:
-    conn = psycopg2.connect("postgresql://binance:binance123@localhost:5432/binance_dw")
+    conn = psycopg2.connect(
+        host=PG_HOST,
+        port=PG_PORT,
+        dbname=PG_DB,
+        user=PG_USER,
+        password=PG_PASSWORD
+    )
     cur = conn.cursor()
     cur.execute("TRUNCATE TABLE fact_binance_trades;")
     print("  -> TRUNCATED fact_binance_trades")

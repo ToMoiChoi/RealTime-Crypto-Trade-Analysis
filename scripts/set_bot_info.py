@@ -34,8 +34,10 @@ def call_telegram_api(method, payload):
                 print(f"✅ Da thiet lap {method} thanh cong!")
             else:
                 print(f"❌ Loi thiet lap {method}: {res}")
+    except urllib.error.HTTPError as he:
+        print(f"❌ Loi goi API {method}: HTTP {he.code} ({he.reason})")
     except Exception as e:
-        print(f"❌ Loi goi API {method}: {e}")
+        print(f"❌ Loi goi API {method}: {type(e).__name__} - {str(e)[:100]}")
 
 def main():
     print("=" * 60)

@@ -1,12 +1,25 @@
+# Python
 venv/
-credentials/
-*.log
-**/__pycache__/
+env/
+__pycache__/
 *.pyc
+*.pyo
+*.pyd
+*.log
+
+# Sensitive environment variables & credentials
 .env
+.env.*
+!.env.example
+credentials/
+*.pem
+*.key
+
+# Data & Caches
+*.csv
 bq_backup/
-.ivy2/
-.claude/
 dlq_bq_failed/
 dlq_bq_success/
-*.csv
+.ivy2/
+.claude/
+.ipynb_checkpoints/

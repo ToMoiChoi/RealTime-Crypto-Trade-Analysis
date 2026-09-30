@@ -27,8 +27,11 @@ def get_updates():
         req = urllib.request.urlopen(url, timeout=10)
         res = json.loads(req.read().decode("utf-8"))
         return res.get("result", [])
+    except urllib.error.HTTPError as he:
+        print(f"Error fetching updates: HTTP {he.code} ({he.reason})")
+        return []
     except Exception as e:
-        print(f"Error fetching updates: {e}")
+        print(f"Error fetching updates: {type(e).__name__} - {str(e)[:100]}")
         return []
 
 def update_env(chat_id):

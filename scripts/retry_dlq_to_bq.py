@@ -64,8 +64,10 @@ def send_alert(message, webhook_url=None, telegram_token=None, telegram_chat_id=
             with urllib.request.urlopen(req, timeout=5) as response:
                 response.read()
             logger.info("Alert sent to Telegram successfully.")
+        except urllib.error.HTTPError as he:
+            logger.error(f"Failed to send alert to Telegram: HTTP {he.code} ({he.reason})")
         except Exception as e:
-            logger.error(f"Failed to send alert to Telegram: {e}")
+            logger.error(f"Failed to send alert to Telegram: {type(e).__name__} - {str(e)[:100]}")
 
 def main():
     # 1. Setup paths

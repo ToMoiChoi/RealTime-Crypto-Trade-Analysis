@@ -32,7 +32,6 @@ load_dotenv()
 # Sửa lỗi in tiếng Việt trên console Windows
 if hasattr(sys.stdout, 'reconfigure'):
     sys.stdout.reconfigure(encoding='utf-8')
-load_dotenv()
 
 PG_HOST     = os.getenv("POSTGRES_HOST", "localhost")
 PG_PORT     = os.getenv("POSTGRES_PORT", "5432")

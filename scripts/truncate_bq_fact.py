@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 BQ_PROJECT_ID = os.getenv("BQ_PROJECT_ID")
-BQ_DATASET    = os.getenv("BQ_DATASET", "paysim_dw")
+BQ_DATASET    = os.getenv("BQ_DATASET", "binance_dw")
 
 if not BQ_PROJECT_ID:
     print("[ERROR] BQ_PROJECT_ID is not configured in .env")
